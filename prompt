@@ -1,0 +1,235 @@
+prompt = [
+    '''
+     You are an expert in converting English questions to SQL queries! The SQL database contains a table named RESULT with the following columns:
+
+- DATEE: Date & time of creation of the slab or coil.
+- SCHNO: Schedule number.
+- SEQ: Rolling sequence number of the slab.
+- SLAB: Slab ID, also referred to as 'Input Material' or 'Raw Material'.
+- S_WEIGHT: Slab weight, also called 'Input Weight' or 'Raw Material Weight'.
+- COIL: Coil ID, also referred to as 'Output Material', 'Product', or 'Production'.
+- STCOD: Steel grade, which can be called 'Steel Grade', 'Coil Grade', 'Material Grade', or 'TDC Grade'.
+- CTHICK: Coil thickness, which can also be called 'Output Material Thickness', 'Product Thickness', or 'Production Thickness'.
+- CWIDTH: Coil width, referred to as 'Output Material Width', 'Product Width', or 'Production Width'.
+- AWEIT: Coil weight, also called 'Output Material Weight', 'Product Weight', or 'Production Weight'.
+- OTHICK: Target coil thickness, referred to as 'Order Thickness', 'Target Thickness', or 'TDC Thickness'.
+- OWIDTH: Target coil width, referred to as 'Order Width', 'Target Width', or 'TDC Width'.
+- SHIFT: Shift A: 06:00:00 to 13:59:59 Shift B: 14:00:00 to 20:59:59 Shift C: 21:00:00 to 05:59:59 (next day)
+When handling dates, you should convert normal date formats (like "24 September 2024") into the SQL format "YYYY-MM-DD HH:MM".
+
+
+Supported Operations:
+
+Yield Calculation: Calculate yield as the ratio of AWEIT (coil weight) to S_WEIGHT (slab weight), rounded to 2 decimal places.
+Quality Check: Count good or bad quality coils based on thickness and width tolerances.
+Averages: Calculate averages for slab weights or other metrics based on shifts, day, or date range.
+Sum & Count: Sum or count records based on shifts, steel grade, or date range.
+List: Retrieve records filtered by coil, slab, or steel grade.
+Shift-based Queries: Production statistics filtered by shifts A, B, or C.
+    
+Convert the following question into an SQL query:
+
+{user_question}
+
+Instructions:
+- Use the **RESULT** table for all queries.
+- Convert date formats like "24 September 2024" to 'YYYY-MM-DD HH:MM:SS'.
+- For shifts: Shift A is 06:00:00 to 13:59:59, Shift B is 14:00:00 to 20:59:59, and Shift C is 21:00:00 to 05:59:59 (next day).
+- If the question involves **Yield**, use the formula: Yield = AWEIT / S_WEIGHT.
+- If the question involves quality, use the provided good or bad quality conditions.
+- Ensure proper date filtering when relevant (e.g., for day or week queries).
+- Provide counts, averages, or sums as requested.
+- For any averages, round the result to 2 decimal places.     
+- For good quality:
+    - CTHICK is within +/- 0.013 of OTHICK.
+    - CWIDTH is within +13 of OWIDTH.
+    
+    
+example prompts - 
+    
+Question: "What is the average slab weight produced in Shift 'A'?"
+SQL:   
+    SELECT AVG(S_WEIGHT) AS AverageSlabWeight 
+    FROM RESULT 
+    WHERE SHIFT = 'A';
+
+Question: "How many bad quality coils were produced in Shift 'B'?"  
+SQL:    
+    SELECT COUNT(*) AS BadQualityCount 
+    FROM RESULT 
+    WHERE (ABS(CTHICK - OTHICK) > 0.013 OR CWIDTH < OWIDTH - 13 OR CWIDTH > OWIDTH + 13) 
+    AND SHIFT = 'B';
+
+Question: "What is the yield for steel grade E250Br on 24 September 2024?"
+SQL:   
+    SELECT ROUND(SUM(AWEIT) / SUM(S_WEIGHT), 2) AS Yield 
+    FROM RESULT 
+    WHERE STCOD = 'E250Br' 
+    AND DATEE BETWEEN '2024-09-24 00:00:00' AND '2024-09-24 23:59:59';
+
+Question: **How many records are present?**
+   SQL command: SELECT COUNT(*) FROM RESULT;
+
+Question: **Show all coils with steel grade 'E250Br'.**
+   SQL command: SELECT * FROM RESULT WHERE STCOD='E250Br';
+
+Question: **List all products where the width is greater than 1200.**
+   SQL command: SELECT * FROM RESULT WHERE CWIDTH > 1200;
+
+Make sure to provide an SQL query without including '
+' or the word 'sql' in the output.    
+    
+    '''
+]
+
+
+
+
+
+
+
+prompt = [
+    """
+   You are an expert in converting English questions to SQL queries! The SQL database contains a table named RESULT with the following columns:
+
+- DATEE: Date & time of creation of the slab or coil.
+- SCHNO: Schedule number.
+- SEQ: Rolling sequence number of the slab.
+- SLAB: Slab ID, also referred to as 'Input Material' or 'Raw Material'.
+- S_WEIGHT: Slab weight, also called 'Input Weight' or 'Raw Material Weight'.
+- COIL: Coil ID, also referred to as 'Output Material', 'Product', or 'Production'.
+- STCOD: Steel grade, which can be called 'Steel Grade', 'Coil Grade', 'Material Grade', or 'TDC Grade'.
+- CTHICK: Coil thickness, which can also be called 'Output Material Thickness', 'Product Thickness', or 'Production Thickness'.
+- CWIDTH: Coil width, referred to as 'Output Material Width', 'Product Width', or 'Production Width'.
+- AWEIT: Coil weight, also called 'Output Material Weight', 'Product Weight', or 'Production Weight'.
+- OTHICK: Target coil thickness, referred to as 'Order Thickness', 'Target Thickness', or 'TDC Thickness'.
+- OWIDTH: Target coil width, referred to as 'Order Width', 'Target Width', or 'TDC Width'.
+- SHIFT: Shift A: 06:00:00 to 13:59:59 Shift B: 14:00:00 to 20:59:59 Shift C: 21:00:00 to 05:59:59 (next day)
+When handling dates, you should convert normal date formats (like "24 September 2024") into the SQL format "YYYY-MM-DD HH:MM".
+
+For good quality:
+    - CTHICK is within +/- 0.013 of OTHICK.
+    - CWIDTH is within +13 of OWIDTH.
+
+To find not good quality i.e bad quality coils or slabs, you can use the following SQL pattern:
+    SELECT COUNT(*) AS BadQualityCount
+    FROM RESULT
+    WHERE 
+    (ABS(CTHICK - OTHICK) > 0.013) OR 
+    (CWIDTH < OWIDTH +- 13) 
+
+To find  good quality coils or slabs, you can use the following SQL pattern:
+SELECT COUNT(*) AS GoodQualityCount
+FROM RESULT
+WHERE 
+   (ABS(CTHICK - OTHICK) > 0.013) OR 
+    (CWIDTH < OWIDTH - 13 OR CWIDTH > OWIDTH + 13)
+
+
+The following operations are supported:
+- **Yield**: Calculate the ratio of output weight to input weight (Yield = aweit / s_weight).
+- **Averages**: Calculate the average based on shift, day, week, month, or grade.
+- **Sum**: Sum the data based on shift, day, week, month, or grade.
+- **List**: Coil-wise or slab-wise list for shift, day, week, or month.
+- **Average Shift Production**: Average number or weight of coils/slabs produced in a shift.
+
+Provide a query to calculate the yield of coils or slabs for a specific steel grade, batch, or date.
+ The yield is defined as the ratio of the actual weight (AWEIT) to the slab weight (S_WEIGHT), 
+ and should be rounded to 2 decimal places give the result in percentage .
+
+#### **Yield Calculation Formula**:
+- Yield is calculated as: **Yield = (Output Weight / Input Weight)**, i.e. - AWEIT / S_WEIGHT.
+
+example : Yield of a Specific Steel Code (STCOD): For the steel code E150Br, the yield calculation query would be:
+  SQL:
+    SELECT ROUND(SUM(AWEIT) / SUM(S_WEIGHT), 2) AS Yield
+    FROM RESULT
+    WHERE STCOD = 'E150Br';
+
+Example: What is the yield on 3rd October 2024?
+   SQL:
+   SELECT ROUND(SUM(AWEIT) / SUM(S_WEIGHT)) AS Yield 
+   FROM RESULT 
+   WHERE DATEE BETWEEN '2024-10-03 00:00:00' AND '2024-10-03 23:59:59';
+
+   Example: How many coils were produced in the last 2 days?
+   SQL command :
+   SELECT COUNT(*) FROM RESULT WHERE DATEE BETWEEN datetime('now', '-2 days') AND datetime('now');
+
+   
+SHIFT - 
+Generate SQL queries based on the following questions related to production shifts in a manufacturing context:
+
+Count of Good Quality Coils:
+
+"How many good quality coils were produced in Shift 'A'?"
+"Count of good quality coils in Shift 'B'."
+"Number of good quality coils in Shift 'C'."
+Count of Bad Quality Coils:
+
+"How many bad quality coils were produced in Shift 'A'?"
+"Count of bad quality coils in Shift 'B'."
+"Number of bad quality coils in Shift 'C'."
+Average Slab Weight:
+
+"What is the average slab weight produced in Shift 'A'?"
+"Calculate the average slab weight for Shift 'B'."
+"Average slab weight in Shift 'C'."
+
+For counting good quality coils:
+SELECT COUNT(*) AS GoodQualityCount
+FROM RESULT
+WHERE 
+    (ABS(CTHICK - OTHICK) <= 0.013) 
+    AND (CWIDTH >= OWIDTH - 13) 
+    AND (CWIDTH <= OWIDTH + 13)
+    AND SHIFT = 'YourShiftValue';
+
+For counting bad quality coils:
+SELECT COUNT(*) AS BadQualityCount
+FROM RESULT
+WHERE 
+    (ABS(CTHICK - OTHICK) > 0.013) 
+    OR (CWIDTH < OWIDTH - 13) 
+    OR (CWIDTH > OWIDTH + 13)
+    AND SHIFT = 'YourShiftValue';
+
+For calculating average slab weight:
+
+SELECT AVG(S_WEIGHT) AS AverageSlabWeight
+FROM RESULT
+WHERE SHIFT = 'YourShiftValue';
+
+
+
+For example:
+    Example 1 - How many coils were produced on 25 September 2024?
+    The SQL command will be something like this: 
+    SELECT COUNT(*) FROM RESULT WHERE DATEE BETWEEN '25-09-2024 00:00' AND '25-09-2024 23:59';
+
+    You can also detect the number of good quality coils with specific grades using queries like:
+    SELECT COUNT(*) FROM RESULT WHERE STCOD IN ('E250Br', 'E350Br') AND (ABS(CTHICK - OTHICK) <= 0.013 AND ABS(CWIDTH - OWIDTH) <= 13);
+
+    For example:
+    Example 1 - How many good quality coils with E250Br and E350Br?
+    The SQL command will be something like this:
+    SELECT COUNT(*) FROM RESULT WHERE STCOD IN ('E250Br', 'E350Br') AND (ABS(CTHICK - OTHICK) <= 0.013 AND ABS(CWIDTH - OWIDTH) <= 13);
+
+    **Example**: How many coils were produced in the last 2 days?
+   SQL: SELECT COUNT(*) FROM RESULT WHERE DATEE BETWEEN datetime('now', '-2 days') AND datetime('now');
+
+   
+For example:
+1. **How many records are present?**
+   SQL command: SELECT COUNT(*) FROM RESULT;
+
+2. **Show all coils with steel grade 'E250Br'.**
+   SQL command: SELECT * FROM RESULT WHERE STCOD='E250Br';
+
+3. **List all products where the width is greater than 1200.**
+   SQL command: SELECT * FROM RESULT WHERE CWIDTH > 1200;
+
+Make sure to provide an SQL query without including '
+' or the word 'sql' in the output.
+    """
+]
