@@ -33,7 +33,7 @@ prompt = [
     '''
      You are an expert in converting English questions to SQL queries! The SQL database contains a table named RESULT with the following columns:
 
-- DATEE: Date & time of creation of the slab or coil.
+- DATEE: Date & time of creation of the slab or coil. also called as Production  time
 - DATESE: Staring Date & Time of Creation of slab or coil . 
 - SCHNO: Schedule number.
 - SEQ: Rolling sequence number of the slab.
@@ -49,16 +49,18 @@ prompt = [
 - SHIFT: Shift A: 06:00:00 to 13:59:59 Shift B: 14:00:00 to 21:59:59 Shift C: 22:00:00 to 05:59:59 (next day)
 - STIME: Stoppage time refers to the time resulting into stoppage of the manifacturing.
 - Production time refers to the time taken for production of a coil i.e.  time of creation of the slab or coil - Staring Date & Time of Creation of slab or coil - or  DATEE - DATESE
-- Production time =  ( DATEE - DATESE) it should always be in minutes
+- Production duration =  ( DATEE - DATESE) it should always be in minutes
 
 Additional concepts:
-1. Line Running Time / Running Time = sum of Production time for all coils in a given period (day or shift)
+1. Line Running Time / Running Time = sum of Production duration for all coils in a given period (day or shift)
 2. Idle Time = Total available time - Line Running Time
 3. Running Time Percentage (%) = (Line Running Time / Total available time) * 100
 4. Idle Time Percentage (%) = (Idle Time / Total available time) * 100
-5. Total Production time (the sum) is the same as line running time 
-
-
+5. Production time = DATEE
+ i.e. - the time of creation of coil
+6. When asked about any question related to weight, convert the weight from kgs into tons. 
+eg - 23000 = 23 tons
+ 
 IMPORTANT:
 Do not include any markdown formatting, code block indicators (like ```), or the word 'sql' in your response.
 Provide only the SQL query text, without any additional explanations or comments.
@@ -77,6 +79,8 @@ as it falls within the C shift of 29/09/2024. The day cycle runs from 6:00 AM to
 on the following day still belongs to the previous day's shift.
 When handling dates, you should convert normal date formats (like "24 September 2024") into the SQL format "YYYY-MM-DD HH:MM".
 
+When asked about production time , give the answer in DATEE and dont convert it into minutes.
+Q - what is the production time for NA001319
 
 1. Calculate the average production time per day:
 SQL:
@@ -489,45 +493,51 @@ Make sure to provide an SQL query without including '
     '''
 ]
 
-column_synonyms = {
-    "slab": ["input material", "raw material", "slab"],
-    "slab weight": ["slab weight","input weight", "raw material weight"],
-    "coil": [ "coil","product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"],
-    "steel grade": ["steel grade","steel grade", "coil grade", "material grade", "tdc grade", "output material grade"],
-    "coil thickness": [ "coil thickness","output material thickness", "product thickness", "production thickness", "Batch thickness", "Hot Thickness"],
-    "coil width": [ "coil width","output material width", "product width", "production width", "Batch width", "Hot Width"],
-    "coil weight": [   "coil weight","output material weight", "product weight", "production weight", "Plant Production", "Hot Metal Produced", "HSM Output", "Rolling Weight", "Hot Rolling Weight"],
-    "target coil thickness": ["target coil thickness","order thickness", "target thickness", "tdc thickness", "Modified Thickness"],
-    "target coil width": ["target coil width","order width", "target width", "tdc width", "Modified Width"],
-    "line running time": ["line running time", "Plant Running running time"],
-    "Production duration" : [ "Production duration" ," Coil Running Time", "Time for Production", "Time taken to Produce the coil"],
-    "idle time": ["idle time","available time", "total available time"],
-    "running time percentage": ["running time percentage","running time %", "running time percentage"],
-    "idle time percentage": ["idle time percentage", "idle time %", "idle time percentage"],
-    "production Start Time": [ "Production Start Time","Coil Start Time", "Rolling Start Time"],
-    "coil Production Time": ["Coil Production Time","Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"],
-    "shift a": ["shift A", "06:00:00 to 13:59:59"],
-    "shift b": ["shift B", "14:00:00 to 21:59:59"],
-    "shift c": ["shift C", "22:00:00 to 05:59:59"]
+
+column_synonyms_with_units = {
+    "slab": {"synonyms": ["input material", "raw material", "slab"], "unit": None},
+    "slab weight": {"synonyms": ["slab weight", "input weight", "raw material weight"], "unit": "tons"},
+    "coil": {"synonyms": ["coil", "product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
+    "steel grade": {"synonyms": ["steel grade", "coil grade", "material grade", "tdc grade", "output material grade"], "unit": None},
+    "coil thickness": {"synonyms": ["coil thickness", "output material thickness", "product thickness", "production thickness", "Batch thickness", "Hot Thickness"], "unit": "mm"},
+    "coil width": {"synonyms": ["coil width", "output material width", "product width", "production width", "Batch width", "Hot Width"], "unit": "mm"},
+    "coil weight": {"synonyms": ["coil weight", "output material weight", "product weight", "production weight", "Plant Production", "Hot Metal Produced", "HSM Output", "Rolling Weight", "Hot Rolling Weight"], "unit": "tons"},
+    "target coil thickness": {"synonyms": ["target coil thickness", "order thickness", "target thickness", "tdc thickness", "Modified Thickness"], "unit": "mm"},
+    "target coil width": {"synonyms": ["target coil width", "order width", "target width", "tdc width", "Modified Width"], "unit": "mm"},
+    "line running time": {"synonyms": ["line running time", "Plant Running running time"], "unit": "min"},
+    "production duration": {"synonyms": ["Production duration", "Coil Running Time", "Time for Production", "Time taken to Produce the coil"], "unit": "min"},
+    "idle time": {"synonyms": ["idle time", "available time", "total available time"], "unit": "min"},
+    "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage"], "unit": "%"},
+    "idle time percentage": {"synonyms": ["idle time percentage", "idle time %", "idle time percentage"], "unit": "%"},
+    "production Start Time": {"synonyms": ["Production Start Time", "Coil Start Time", "Rolling Start Time"], "unit": None},
+    "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": None},
+    "shift a": {"synonyms": ["shift A", "06:00:00 to 13:59:59"], "unit": None},
+    "shift b": {"synonyms": ["shift B", "14:00:00 to 21:59:59"], "unit": None},
+    "shift c": {"synonyms": ["shift C", "22:00:00 to 05:59:59"], "unit": None},
 }
 
-
-def check_for_synonyms(question):
+def check_for_synonyms_with_units(question):
     best_match = None
     best_match_length = 0
-    
+    unit = None
     question_lower = question.lower()
-    
-    for column, synonyms in column_synonyms.items():
-        for synonym in synonyms:
+    for column, details in column_synonyms_with_units.items():
+        for synonym in details["synonyms"]:
             synonym_lower = synonym.lower()
-            # checks longest found syn
             if synonym_lower in question_lower and len(synonym_lower) > best_match_length:
                 best_match = column
                 best_match_length = len(synonym_lower)
-                
-    return best_match
+                unit = details["unit"]
 
+    return best_match, unit
+
+def map_columns_to_units(query):
+    column_units = {}
+    for column, details in column_synonyms_with_units.items():
+        for synonym in details["synonyms"]:
+            if synonym.lower() in query.lower():
+                column_units[column] = details["unit"]
+    return column_units
 
 
 def get_gemini_response(question):
@@ -544,26 +554,61 @@ def read_sql_query(sql, db):
     conn.close()
     return rows
 
- 
-
 @app.post("/query")
 async def query(question: Question):
     try:
+        # Find the best synonym match and its unit
+        synonym, matched_unit = check_for_synonyms_with_units(question.text)
         
+        # Generate SQL query using Gemini
         sql_query = get_gemini_response(question.text)
-        synonym = check_for_synonyms(question.text)
         
-        # "Do you mean X?"
+        # Create "Do you mean" suggestion
         do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
         
         # Execute query
-        data = read_sql_query(sql_query, "results.db")
+        conn = sqlite3.connect("results.db")
+        cursor = conn.cursor()
+        cursor.execute(sql_query)
         
-        return {"query": sql_query, "results": data, "do_you_mean": do_you_mean}
+        # Get column names and fetch results
+        columns = [description[0] for description in cursor.description]
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Map columns to units based on the query
+        column_units = map_columns_to_units(sql_query)
+        
+        # Format results with units
+        formatted_results = []
+        for row in results:
+            formatted_row = []
+            for i, value in enumerate(row):
+                # Try to find a unit for the current column
+                column_name = columns[i].lower()
+                unit = next((
+                    unit for col, unit in column_units.items() 
+                    if col.lower() in column_name
+                ), None)
+                
+                # Format value with unit if found
+                formatted_value = f"{value} {unit}" if unit else str(value)
+                formatted_row.append(formatted_value)
+            
+            formatted_results.append(formatted_row)
+        
+        return {
+            "query": sql_query,
+            "do_you_mean": do_you_mean,
+            "synonym": synonym,
+            "matched_unit": matched_unit,
+            "results": formatted_results,
+            "columns": columns
+        }
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
+    
 @app.get("/")
 async def root():
     return {"message": "Welcome to the SQL Query API"}
@@ -572,15 +617,6 @@ if __name__ == "__main__":
     
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-
-
-
-
-
 
 
 # --------------------------------------------------------------
