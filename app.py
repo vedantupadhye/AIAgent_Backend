@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import os
 import sqlite3
 import google.generativeai as genai
+from typing import Optional 
 
 load_dotenv()
 
@@ -534,9 +535,9 @@ Make sure to provide an SQL query without including '
 
 
 column_synonyms_with_units = {
-    "slab": {"synonyms": ["input material", "raw material", "slab"], "unit": None},
+    "slab": {"synonyms": ["input material", "raw material", "slab"], "unit": "tons"},
     "slab weight": {"synonyms": ["slab weight", "input weight", "raw material weight"], "unit": "tons"},
-    "coil": {"synonyms": ["coil", "product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
+    "coil": {"synonyms": ["coil","produced","produce" ,"product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
     "steel grade": {"synonyms": ["steel grade", "coil grade", "material grade", "tdc grade", "output material grade"], "unit": None},
     "coil thickness": {"synonyms": ["coil thickness", "output material thickness", "product thickness", "production thickness", "Batch thickness", "Hot Thickness"], "unit": "mm"},
     "coil width": {"synonyms": ["coil width", "output material width", "product width", "production width", "Batch width", "Hot Width"], "unit": "mm"},
@@ -546,10 +547,11 @@ column_synonyms_with_units = {
     "line running time": {"synonyms": ["line running time", "Plant Running running time"], "unit": "min"},
     "production duration": {"synonyms": ["Production duration", "Coil Running Time", "Time for Production", "Time taken to Produce the coil"], "unit": "min"},
     "idle time": {"synonyms": ["idle time", "available time", "total available time"], "unit": "min"},
-    "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage"], "unit": "%"},
+    "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage","line running percentage","line running %"], "unit": "%"},
     "idle time percentage": {"synonyms": ["idle time percentage", "idle time %", "idle time percentage"], "unit": "%"},
     "production Start Time": {"synonyms": ["Production Start Time", "Coil Start Time", "Rolling Start Time"], "unit": None},
-    "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": None},
+    "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": "min"},
+    "yeild":{"synonyms": ["total yeild", "yeild"], "unit": "%"},
     "shift a": {"synonyms": ["shift A", "06:00:00 to 13:59:59"], "unit": None},
     "shift b": {"synonyms": ["shift B", "14:00:00 to 21:59:59"], "unit": None},
     "shift c": {"synonyms": ["shift C", "22:00:00 to 05:59:59"], "unit": None},
@@ -592,6 +594,8 @@ def read_sql_query(sql, db):
     conn.commit()
     conn.close()
     return rows
+
+
 
 @app.post("/query")
 async def query(question: Question):
@@ -647,7 +651,8 @@ async def query(question: Question):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+   
 @app.get("/")
 async def root():
     return {"message": "Welcome to the SQL Query API"}
@@ -656,6 +661,84 @@ if __name__ == "__main__":
     
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+# def generate_reconfirmation_message(question):
+#     """
+#     Uses Gemini to generate a reconfirmation message for the given question based on column synonyms.
+#     """
+#     # Define the column details in a readable format for the Gemini model
+#     column_details = "\n".join(
+#         f"{column}: Synonyms = {details['synonyms']}, Unit = {details['unit'] or 'None'}"
+#         for column, details in column_synonyms_with_units.items()
+#     )
+
+#     # Build the prompt dynamically
+#     prompt_template = (
+#         "You are an intelligent assistant. Below is a list of column names, their synonyms, and units:\n"
+#         "{column_details}\n\n"
+#         "The user has asked: '{question}'. Find the closest matching column based on synonyms and frame a polite "
+#         "and concise reconfirmation message. If no synonym matches, respond with: "
+#         "'I couldn't identify a specific term. Could you clarify further?'."
+#       "example -  question is - what was the average input material weight reconfirmation message - do you mean coil weight ?"
+#     )
+#     reconfirmation_prompt = prompt_template.format(column_details=column_details, question=question)
+    
+#     # Call the Gemini model with the new prompt
+#     model = genai.GenerativeModel('gemini-pro')
+#     response = model.generate_content([reconfirmation_prompt])
+#     return response.text
+
+
+# @app.post("/query")
+# async def query(question: Question, clarification: Optional[str] = None):
+#     """
+#     Handles user queries by generating SQL queries, and optionally reconfirms the question if needed.
+#     """
+#     try:
+#         # Determine whether this is a clarified query or an initial query
+#         final_question = clarification if clarification else question.text
+
+#         # Generate the SQL query using Gemini
+#         sql_query = get_gemini_response(final_question)
+        
+#         # If clarification is not provided, generate a reconfirmation message
+#         if not clarification:
+#             reconfirmation_message = generate_reconfirmation_message(question.text)
+#             return {
+#                 "initial_response": {
+#                     "query": sql_query,
+#                     "reconfirmation_message": reconfirmation_message,
+#                 },
+#                 "message": "Please confirm or refine your query."
+#             }
+
+#         # Execute the SQL query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+
+#         # Fetch column names and results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+
+#         return {
+#             "query": sql_query,
+#             "results": results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+ 
+
+
+
 
 
 
