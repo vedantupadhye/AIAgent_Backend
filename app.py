@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import os
 import sqlite3
 import google.generativeai as genai
+from typing import Optional 
 
 load_dotenv()
 
@@ -32,6 +33,13 @@ class Question(BaseModel):
 prompt = [
     '''
      You are an expert in converting English questions to SQL queries! The SQL database contains a table named RESULT with the following columns:
+Consider a day to start at 6:00 AM and end at 5:59 AM the following day. Given a specific date, generate an SQL query to retrieve data within this 24-hour window, accounting for shift-based production.
+When a question involves a specific date, interpret the date range as follows:
+
+The day begins at 6:00 AM of the given date and ends at 6:00 AM the next day.
+For example:
+If the user asks about 26 September, the date range should be:
+WHERE DATEE >= '2024-09-26 06:00:00' AND DATEE < '2024-09-27 06:00:00'.
 
 - DATEE: Date & time of creation of the slab or coil. also called as Production  time
 - DATESE: Staring Date & Time of Creation of slab or coil . 
@@ -58,25 +66,80 @@ Additional concepts:
 4. Idle Time Percentage (%) = (Idle Time / Total available time) * 100
 5. Production time = DATEE
  i.e. - the time of creation of coil
-6. When asked about any question related to weight, convert the weight from kgs into tons. 
-eg - 23000 = 23 tons
+
  
 IMPORTANT:
 Do not include any markdown formatting, code block indicators (like ```), or the word 'sql' in your response.
 Provide only the SQL query text, without any additional explanations or comments.
 Ensure the query is syntactically correct and ready for direct execution in an SQL environment.
-   The day cycle starts from 6 AM to 6 AM the following day. Each day will consist of three shifts:
-- **Shift A**: Runs from 06:00 AM to 01:59 PM (13:59:59).
-- **Shift B**: Runs from 02:00 PM to 09:59 PM (21:59:59).
-- **Shift C**: Runs from 10:00 PM to 05:59 AM the next day.
 
-For example:
-- For **24 September**, the day starts from **06:00 AM** and ends at **05:59 AM** on **25 September**.
-- For **25 September**, the day starts from **06:01 AM** and ends at **05:59 AM** on **26 September**.
-When a coil is produced between 12:00 AM and 6:00 AM, but falls under the C shift of the previous day, it should be recorded as produced on the prior day. 
-For example, if a coil is produced at 02:00 AM on 30/09/2024, it should be considered as produced on 29/09/2024, 
-as it falls within the C shift of 29/09/2024. The day cycle runs from 6:00 AM to 6:00 AM, so any coil produced before 6:00 AM 
-on the following day still belongs to the previous day's shift.
+
+When querying data based on a specific date:
+Use the time range from 6:00 AM on the given date to 6:00 AM on the next day.
+For example, for 25 September, use:
+WHERE DATEE >= '2024-09-25 06:00:00' AND DATEE < '2024-09-26 06:00:00'.
+Make sure to apply this logic consistently for any date-related questions.
+For example, if asked about 27 September, generate:
+WHERE DATEE >= '2024-09-27 06:00:00' AND DATEE < '2024-09-28 06:00:00'.
+Ensure that any queries related to dates follow this format strictly.
+For any question asked relatd to date on any topic like Yield,difference, coil weight , coil width , slab weight, coil thickness, minimum or maximum then strictly use the above format for each question.
+
+The day cycle starts from 6:00 AM to 6:00 AM the following day. Each day will consist of three shifts:
+
+Shift A: Runs from 06:00 AM to 01:59 PM (13:59:59).
+Shift B: Runs from 02:00 PM to 09:59 PM (21:59:59).
+Shift C: Runs from 10:00 PM to 05:59 AM the next day.
+Consider a day to start at 6:00 AM and end at 5:59 AM the following day. Given a specific date, generate an SQL query to retrieve data within this 24-hour window, accounting for shift-based production.
+
+When querying data based on a specific date:
+   - Use the time range from 6:00 AM on the given date to 6:00 AM on the next day.
+- For example, for 26 September:
+     WHERE DATEE >= '2024-09-26 06:00:00' AND DATEE < '2024-09-27 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-26'.
+
+- For example, for 25 September:
+     WHERE DATEE >= '2024-09-25 06:00:00' AND DATEE < '2024-09-26 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-25'.
+
+- For example, for 27 September:
+     WHERE DATEE >= '2024-09-27 06:00:00' AND DATEE < '2024-09-28 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-27'.
+
+- For example, for 28 September:
+     WHERE DATEE >= '2024-09-28 06:00:00' AND DATEE < '2024-09-29 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-28'.
+
+- For example, for 29 September:
+     WHERE DATEE >= '2024-09-29 06:00:00' AND DATEE < '2024-09-30 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-29'.
+
+- For example, for 30 September:
+     WHERE DATEE >= '2024-09-30 06:00:00' AND DATEE < '2024-10-01 06:00:00'.
+
+FAILURE EXAMPLES:
+Incorrect: WHERE DATE(DATEE) = '2024-09-30'.
+
+question -  average coil weight on 27
+
+SELECT ROUND(AVG(AWEIT), 2) AS AvgCoilWeight 
+FROM RESULT 
+WHERE DATEE >= '2024-09-27 06:00:00' AND DATEE < '2024-09-28 06:00:00';
+
+
+If a coil is produced between 12:00 AM and 6:00 AM, but falls under the C shift of the previous day, it should be recorded as produced on the prior day.
+For example, if a coil is produced at 02:00 AM on 30/09/2024, it should be considered as produced on 29/09/2024, as it falls within the C shift of 29/09/2024. The day cycle runs from 6:00 AM to 6:00 AM, so any coil produced before 6:00 AM on the following day still belongs to the previous day's shift.
+
+When querying data based on a specific date (for example, 27 September), the time range should be from 06:00 AM on 27th to 05:59 AM on 28th.
 When handling dates, you should convert normal date formats (like "24 September 2024") into the SQL format "YYYY-MM-DD HH:MM".
 
 When asked about production time , give the answer in DATEE and dont convert it into minutes.
@@ -340,7 +403,7 @@ Instructions:
   - **Shift B** is 14:00:00 to 21:59:59 on the same day.
   - **Shift C** is 22:00:00 of the current day to 05:59:59 of the next day.
 
-- If asked about Tons, then calculate the sum of AWEIT. While giving answer , convert it into Tons ( 1 ton = 1000KG )
+
     - Tons per day refers to the sum of AWEIT for the whole day.
     - Tons per hour refers to AWEIT / number of hours.
 -If the question involves Yield, use the formula: Yield = (AWEIT * 100 / S_WEIGHT).
@@ -351,8 +414,7 @@ Instructions:
 -When comparing yields:
     Good yield: Yield >= 97.000
     Bad yield: Yield < 97.000
-
-
+    
 Example for calculating yield on a specific date:
 SELECT printf('%.3f', AVG((AWEIT * 100.0 / S_WEIGHT))) AS AverageYield
 FROM RESULT
@@ -495,9 +557,11 @@ Make sure to provide an SQL query without including '
 
 
 column_synonyms_with_units = {
+    "count": {"synonyms": ["number", "count", "quantity"], "unit": None},
+    "date": {"synonyms": ["day", "date", "which day","total number of"], "unit": None},
     "slab": {"synonyms": ["input material", "raw material", "slab"], "unit": None},
     "slab weight": {"synonyms": ["slab weight", "input weight", "raw material weight"], "unit": "tons"},
-    "coil": {"synonyms": ["coil", "product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
+    "coil": {"synonyms": ["coil","produced","produce" ,"product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
     "steel grade": {"synonyms": ["steel grade", "coil grade", "material grade", "tdc grade", "output material grade"], "unit": None},
     "coil thickness": {"synonyms": ["coil thickness", "output material thickness", "product thickness", "production thickness", "Batch thickness", "Hot Thickness"], "unit": "mm"},
     "coil width": {"synonyms": ["coil width", "output material width", "product width", "production width", "Batch width", "Hot Width"], "unit": "mm"},
@@ -507,20 +571,32 @@ column_synonyms_with_units = {
     "line running time": {"synonyms": ["line running time", "Plant Running running time"], "unit": "min"},
     "production duration": {"synonyms": ["Production duration", "Coil Running Time", "Time for Production", "Time taken to Produce the coil"], "unit": "min"},
     "idle time": {"synonyms": ["idle time", "available time", "total available time"], "unit": "min"},
-    "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage"], "unit": "%"},
+    "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage","line running percentage","line running %"], "unit": "%"},
     "idle time percentage": {"synonyms": ["idle time percentage", "idle time %", "idle time percentage"], "unit": "%"},
     "production Start Time": {"synonyms": ["Production Start Time", "Coil Start Time", "Rolling Start Time"], "unit": None},
-    "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": None},
+    "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": "min"},
+    "yield":{"synonyms": ["total yield", "yeild","yield"], "unit": "%"},
     "shift a": {"synonyms": ["shift A", "06:00:00 to 13:59:59"], "unit": None},
     "shift b": {"synonyms": ["shift B", "14:00:00 to 21:59:59"], "unit": None},
     "shift c": {"synonyms": ["shift C", "22:00:00 to 05:59:59"], "unit": None},
 }
+
 
 def check_for_synonyms_with_units(question):
     best_match = None
     best_match_length = 0
     unit = None
     question_lower = question.lower()
+
+    # Explicitly prioritize "count" and "date"
+    for column in ["count", "date"]:
+        details = column_synonyms_with_units[column]
+        for synonym in details["synonyms"]:
+            synonym_lower = synonym.lower()
+            if synonym_lower in question_lower:
+                return column, details["unit"]  # Return immediately if "count" or "date" matches
+
+    # If no match for "count" or "date", check other synonyms
     for column, details in column_synonyms_with_units.items():
         for synonym in details["synonyms"]:
             synonym_lower = synonym.lower()
@@ -531,6 +607,35 @@ def check_for_synonyms_with_units(question):
 
     return best_match, unit
 
+def validate_query_with_gemini(query):
+    """
+    Use Gemini AI to detect ambiguities in the user query and generate recommendations for clarification.
+    """
+    # Prompt Gemini AI to analyze the query
+    clarification_prompt = (
+        "Analyze the following query for ambiguities and generate a list of recommended clarified queries "
+        "to ensure it is meaningful and actionable:\n\n"
+        f"Query: {query}\n\n"
+        "Output:\n1. Identify if the query is ambiguous.\n"
+        "2. Suggest 2-3 clearer versions of the query based on the likely intent.\n"
+    )
+    
+    response = get_gemini_response(clarification_prompt)
+    
+    # Extract details from Gemini's response
+    if "ambiguous" in response.lower():
+        return {
+            "is_valid": False,
+            "recommendations": response.strip()  # Return recommendations generated by Gemini
+        }
+    
+    # If not ambiguous, consider the query valid
+    return {
+        "is_valid": True,
+        "recommendations": None
+    }
+
+
 def map_columns_to_units(query):
     column_units = {}
     for column, details in column_synonyms_with_units.items():
@@ -538,7 +643,6 @@ def map_columns_to_units(query):
             if synonym.lower() in query.lower():
                 column_units[column] = details["unit"]
     return column_units
-
 
 def get_gemini_response(question):
     model = genai.GenerativeModel('gemini-pro')
@@ -554,61 +658,114 @@ def read_sql_query(sql, db):
     conn.close()
     return rows
 
+
 @app.post("/query")
 async def query(question: Question):
     try:
-        # Find the best synonym match and its unit
-        synonym, matched_unit = check_for_synonyms_with_units(question.text)
+        # Validate the user query using Gemini AI
+        validation_result = validate_query_with_gemini(question.text)
         
-        # Generate SQL query using Gemini
+        # If ambiguous, return recommendations for reconfirmation
+        if not validation_result["is_valid"]:
+            return {
+                "reconfirmation_required": True,
+                "message": validation_result["recommendations"]
+            }
+        
+        # Proceed with query generation and execution
         sql_query = get_gemini_response(question.text)
         
-        # Create "Do you mean" suggestion
-        do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
-        
-        # Execute query
+        # Execute the SQL query
         conn = sqlite3.connect("results.db")
         cursor = conn.cursor()
         cursor.execute(sql_query)
         
-        # Get column names and fetch results
+        # Fetch results
         columns = [description[0] for description in cursor.description]
         results = cursor.fetchall()
         conn.close()
         
-        # Map columns to units based on the query
+        # Map and format the results
         column_units = map_columns_to_units(sql_query)
-        
-        # Format results with units
         formatted_results = []
         for row in results:
             formatted_row = []
             for i, value in enumerate(row):
-                # Try to find a unit for the current column
                 column_name = columns[i].lower()
-                unit = next((
-                    unit for col, unit in column_units.items() 
-                    if col.lower() in column_name
-                ), None)
-                
-                # Format value with unit if found
+                unit = next(
+                    (unit for col, unit in column_units.items() if col.lower() in column_name),
+                    None
+                )
                 formatted_value = f"{value} {unit}" if unit else str(value)
                 formatted_row.append(formatted_value)
-            
             formatted_results.append(formatted_row)
         
         return {
             "query": sql_query,
-            "do_you_mean": do_you_mean,
-            "synonym": synonym,
-            "matched_unit": matched_unit,
             "results": formatted_results,
             "columns": columns
         }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         # Find the best synonym match and its unit
+#         synonym, matched_unit = check_for_synonyms_with_units(question.text)
+        
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+        
+#         # Create "Do you mean" suggestion
+#         do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
+        
+#         # Execute query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         # Get column names and fetch results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map columns to units based on the query
+#         column_units = map_columns_to_units(sql_query)
+        
+#         # Format results with units
+#         formatted_results = []
+#         for row in results:
+#             formatted_row = []
+#             for i, value in enumerate(row):
+#                 # Try to find a unit for the current column
+#                 column_name = columns[i].lower()
+#                 unit = next((
+#                     unit for col, unit in column_units.items() 
+#                     if col.lower() in column_name
+#                 ), None)
+                
+#                 # Format value with unit if found
+#                 formatted_value = f"{value} {unit}" if unit else str(value)
+#                 formatted_row.append(formatted_value)
+            
+#             formatted_results.append(formatted_row)
+        
+#         return {
+#             "query": sql_query,
+#             "do_you_mean": do_you_mean,
+#             "synonym": synonym,
+#             "matched_unit": matched_unit,
+#             "results": formatted_results,
+#             "columns": columns
+#         }
     
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+   
 @app.get("/")
 async def root():
     return {"message": "Welcome to the SQL Query API"}
@@ -619,7 +776,264 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
-# --------------------------------------------------------------
+# def check_for_synonyms_with_units(question):
+#     best_match = None
+#     best_match_length = 0
+#     unit = None
+#     question_lower = question.lower()
+#     for column, details in column_synonyms_with_units.items():
+#         for synonym in details["synonyms"]:
+#             synonym_lower = synonym.lower()
+#             if synonym_lower in question_lower and len(synonym_lower) > best_match_length:
+#                 best_match = column
+#                 best_match_length = len(synonym_lower)
+#                 unit = details["unit"]
+
+#     return best_match, unit
+
+
+
+# def generate_gemini_prompt_for_synonyms(question):
+#     """
+#     Builds a prompt to find the closest synonym and unit match using Gemini AI.
+#     """
+#     column_details = "\n".join(
+#         f"{column}: Synonyms = {', '.join(details['synonyms'])}, Unit = {details['unit'] or 'None'}"
+#         for column, details in column_synonyms_with_units.items()
+#     )
+    
+#     prompt = (
+#     "You are an intelligent assistant helping to map user questions to database columns. "
+#     "Here is a list of columns, their synonyms, and units:\n\n"
+#     f"{column_details}\n\n"
+#     "The user has asked: '{question}'. Match the user's query to the most appropriate column "
+#     "based on the synonyms provided. Return the matched column name and its associated unit. "
+#     "If the query is ambiguous, suggest clarification using the format: 'Do you mean <column>?'."
+#     "\n\nExample:\n"
+#     "Columns and synonyms: \n"
+#     "  coil thickness: Synonyms = coil thickness, product thickness, Batch thickness, Unit = mm\n"
+#     "  slab weight: Synonyms = slab weight, input weight, raw material weight, Unit = tons\n"
+#     "User Query: 'What is the product thickness?'\n"
+#     "Output: 'coil thickness, Unit = mm'\n"
+#     "If ambiguous:\n"
+#     "User Query: 'What is the weight?'\n"
+#     "Output: 'Do you mean slab weight?'"
+    
+#     )
+#     return prompt
+
+
+# def check_for_synonyms_with_units_gemini(question):
+
+#     """
+#     Uses Gemini AI to find the best synonym match and determine if a reconfirmation is needed.
+#     """
+#     prompt = generate_gemini_prompt_for_synonyms(question)
+    
+#     model = genai.GenerativeModel('gemini-pro')
+#     response = model.generate_content([prompt])
+#     response_text = response.text.strip()
+    
+#     # Parse Gemini's response for matched column and unit or reconfirmation message
+#     if "Do you mean" in response_text:
+#         matched_column, unit = None, None
+#         reconfirmation_message = response_text
+#     else:
+#         parts = response_text.split(", Unit =")
+#         matched_column = parts[0].strip() if len(parts) > 0 else None
+#         unit = parts[1].strip() if len(parts) > 1 else None
+#         reconfirmation_message = None
+    
+#     return matched_column, unit, reconfirmation_message
+
+
+
+
+
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         # Find the best synonym match and its unit
+#         synonym, matched_unit = check_for_synonyms_with_units(question.text)
+        
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+        
+#         # Create "Do you mean" suggestion
+#         do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
+        
+#         # Execute query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         # Get column names and fetch results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map columns to units based on the query
+#         column_units = map_columns_to_units(sql_query)
+        
+#         # Format results with units
+#         formatted_results = []
+#         for row in results:
+#             formatted_row = []
+#             for i, value in enumerate(row):
+#                 # Try to find a unit for the current column
+#                 column_name = columns[i].lower()
+#                 unit = next((
+#                     unit for col, unit in column_units.items() 
+#                     if col.lower() in column_name
+#                 ), None)
+                
+#                 # Format value with unit if found
+#                 formatted_value = f"{value} {unit}" if unit else str(value)
+#                 formatted_row.append(formatted_value)
+            
+#             formatted_results.append(formatted_row)
+        
+#         return {
+#             "query": sql_query,
+#             "do_you_mean": do_you_mean,
+#             "synonym": synonym,
+#             "matched_unit": matched_unit,
+#             "results": formatted_results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# new for gemini
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         # Use Gemini AI for synonym matching
+#         synonym, matched_unit, reconfirmation_message = check_for_synonyms_with_units_gemini(question.text)
+        
+#         # If reconfirmation is needed, return early
+#         if reconfirmation_message:
+#             return {
+#                 "reconfirmation_message": reconfirmation_message,
+#                 "query": None,
+#                 "results": None,
+#                 "columns": None
+#             }
+        
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+        
+#         # Execute the SQL query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         # Fetch results and column names
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map columns to units and format results
+#         column_units = map_columns_to_units(sql_query)
+#         formatted_results = format_results_with_units(results, columns, column_units)
+        
+#         return {
+#             "query": sql_query,
+#             "synonym": synonym,
+#             "matched_unit": matched_unit,
+#             "results": formatted_results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# def generate_reconfirmation_message(question):
+#     """
+#     Uses Gemini to generate a reconfirmation message for the given question based on column synonyms.
+#     """
+#     # Define the column details in a readable format for the Gemini model
+#     column_details = "\n".join(
+#         f"{column}: Synonyms = {details['synonyms']}, Unit = {details['unit'] or 'None'}"
+#         for column, details in column_synonyms_with_units.items()
+#     )
+
+#     # Build the prompt dynamically
+#     prompt_template = (
+#         "You are an intelligent assistant. Below is a list of column names, their synonyms, and units:\n"
+#         "{column_details}\n\n"
+#         "The user has asked: '{question}'. Find the closest matching column based on synonyms and frame a polite "
+#         "and concise reconfirmation message. If no synonym matches, respond with: "
+#         "'I couldn't identify a specific term. Could you clarify further?'."
+#       "example -  question is - what was the average input material weight reconfirmation message - do you mean coil weight ?"
+#     )
+#     reconfirmation_prompt = prompt_template.format(column_details=column_details, question=question)
+    
+#     # Call the Gemini model with the new prompt
+#     model = genai.GenerativeModel('gemini-pro')
+#     response = model.generate_content([reconfirmation_prompt])
+#     return response.text
+
+
+# @app.post("/query")
+# async def query(question: Question, clarification: Optional[str] = None):
+#     """
+#     Handles user queries by generating SQL queries, and optionally reconfirms the question if needed.
+#     """
+#     try:
+#         # Determine whether this is a clarified query or an initial query
+#         final_question = clarification if clarification else question.text
+
+#         # Generate the SQL query using Gemini
+#         sql_query = get_gemini_response(final_question)
+        
+#         # If clarification is not provided, generate a reconfirmation message
+#         if not clarification:
+#             reconfirmation_message = generate_reconfirmation_message(question.text)
+#             return {
+#                 "initial_response": {
+#                     "query": sql_query,
+#                     "reconfirmation_message": reconfirmation_message,
+#                 },
+#                 "message": "Please confirm or refine your query."
+#             }
+
+#         # Execute the SQL query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+
+#         # Fetch column names and results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+
+#         return {
+#             "query": sql_query,
+#             "results": results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+ 
+
+
+
+
+
+
+
+# -----------------------------------------------------------------------------------
 
 
 # from dotenv import load_dotenv
