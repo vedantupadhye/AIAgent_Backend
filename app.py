@@ -710,6 +710,140 @@ async def query(question: Question):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+# ----------------------------------------------------------------- Recommendation  ----------------------
+
+
+def check_for_synonyms_with_units(question):
+    best_match = None
+    best_match_length = 0
+    unit = None
+    question_lower = question.lower()
+
+    # Explicitly prioritize "count" and "date"
+    for column in ["count", "date"]:
+        details = column_synonyms_with_units[column]
+        for synonym in details["synonyms"]:
+            synonym_lower = synonym.lower()
+            if synonym_lower in question_lower:
+                return column, details["unit"]  # Return immediately if "count" or "date" matches
+
+    # If no match for "count" or "date", check other synonyms
+    for column, details in column_synonyms_with_units.items():
+        for synonym in details["synonyms"]:
+            synonym_lower = synonym.lower()
+            if synonym_lower in question_lower and len(synonym_lower) > best_match_length:
+                best_match = column
+                best_match_length = len(synonym_lower)
+                unit = details["unit"]
+
+    return best_match, unit
+
+def validate_query_with_gemini(query):
+    """
+    Use Gemini to analyze the query and generate recommendations for improvement,
+    providing recommendations for every input query.
+    """
+    # Prompt Gemini AI to analyze the query
+    clarification_prompt = (
+        "Analyze the following query and generate a list of 2-3 improved or clarified versions "
+        "to ensure it is meaningful and actionable:\n\n"
+        f"Query: {query}\n\n"
+        "Output:\nProvide 2-3 clearer versions of the query based on the likely intent."
+    )
+    
+
+    response = get_gemini_response(clarification_prompt)
+    
+    # recommendations
+    recommendations = response.strip().split("\n")  
+    return {
+        "original_query": query,
+        "recommendations": recommendations  
+    }
+
+def map_columns_to_units(query):
+    """
+    Maps column names in the SQL query to their respective units based on predefined synonyms.
+    """
+    column_units = {}
+    for column, details in column_synonyms_with_units.items():
+        for synonym in details["synonyms"]:
+            if synonym.lower() in query.lower():
+                column_units[column] = details["unit"]
+    return column_units
+
+def get_gemini_response(question):
+    """
+    Send a query to the Gemini model and get a generated response.
+    """
+    model = genai.GenerativeModel('gemini-pro')
+    response = model.generate_content([prompt[0], question])
+    return response.text
+
+def read_sql_query(sql, db):
+    """
+    Execute an SQL query on the given database and return the results.
+    """
+    conn = sqlite3.connect(db)
+    cur = conn.cursor()
+    cur.execute(sql)
+    rows = cur.fetchall()
+    conn.commit()
+    conn.close()
+    return rows
+
+import logging
+
+@app.post("/query")
+async def query(question: Question):
+    try:
+        logging.info(f"Received query: {question.text}")
+
+        # Validate the user query and generate recommendations
+        validation_result = validate_query_with_gemini(question.text)
+        logging.info(f"Validation result: {validation_result}")
+
+        recommendations = validation_result.get("recommendations", [])
+
+        recommendation_results = []
+        for rec in recommendations:
+            sql_query = get_gemini_response(rec)
+            logging.info(f"Generated SQL query: {sql_query}")
+
+            query_results = read_sql_query(sql_query, 'results.db')
+            logging.info(f"Query results: {query_results}")
+
+            recommendation_results.append({
+                "recommendation_message": rec,
+                "query": sql_query,
+                "results": query_results
+            })
+
+        return {"recommendations": recommendation_results}
+
+    except Exception as e:
+        logging.error(f"Error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+   
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the SQL Query API"}
+
+if __name__ == "__main__":
+    
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
+
+
 # @app.post("/query")
 # async def query(question: Question):
 #     try:
