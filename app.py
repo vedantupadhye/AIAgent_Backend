@@ -10,6 +10,7 @@ import os
 import sqlite3
 import google.generativeai as genai
 from typing import Optional 
+import logging
 
 load_dotenv()
 
@@ -30,9 +31,11 @@ app.add_middleware(
 class Question(BaseModel):
     text: str
 
+
 prompt = [
     '''
-     You are an expert in converting English questions to SQL queries! The SQL database contains a table named RESULT with the following columns:
+You are an expert in converting English questions to SQL queries! The SQL database contains 2 tables named RESULT and setupResults with the following columns and COIL as the primary key to connect the 2 tables:
+based on the columns of the 2 tables, generate query note that if needed then join the tables to generate the query.
 Consider a day to start at 6:00 AM and end at 5:59 AM the following day. Given a specific date, generate an SQL query to retrieve data within this 24-hour window, accounting for shift-based production.
 When a question involves a specific date, interpret the date range as follows:
 
@@ -40,6 +43,8 @@ The day begins at 6:00 AM of the given date and ends at 6:00 AM the next day.
 For example:
 If the user asks about 26 September, the date range should be:
 WHERE DATEE >= '2024-09-26 06:00:00' AND DATEE < '2024-09-27 06:00:00'.
+
+results table -
 
 - DATEE: Date & time of creation of the slab or coil. also called as Production  time
 - DATESE: Staring Date & Time of Creation of slab or coil . 
@@ -59,6 +64,15 @@ WHERE DATEE >= '2024-09-26 06:00:00' AND DATEE < '2024-09-27 06:00:00'.
 - Production time refers to the time taken for production of a coil i.e.  time of creation of the slab or coil - Staring Date & Time of Creation of slab or coil - or  DATEE - DATESE
 - Production duration =  ( DATEE - DATESE) it should always be in minutes
 
+setupResults Table:
+
+STCOD: Steel grade, serves as the link between RESULT and setupResults tables.
+RMRG : RM Roll Gap 
+RMTHICK : Rolled Bar Thickness
+RMWIDTH : Rolled Bar Width 
+
+Do not include any markdown formatting, code block indicators (like ```), or the word 'sql' in your response.
+
 Additional concepts:
 1. Line Running Time / Running Time = sum of Production duration for all coils in a given period (day or shift)
 2. Idle Time = Total available time - Line Running Time
@@ -66,6 +80,13 @@ Additional concepts:
 4. Idle Time Percentage (%) = (Idle Time / Total available time) * 100
 5. Production time = DATEE
  i.e. - the time of creation of coil
+
+
+example - 
+SELECT setupResults.RMTHICK 
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE RESULT.COIL = 'NA001311';
 
  
 IMPORTANT:
@@ -187,7 +208,18 @@ SELECT
 FROM RESULT
 GROUP BY COIL;
 
+Weight related - 
+Both coil weights (AWEIT) and slab weights (S_WEIGHT) are stored in the database in tons.
+Any question involving weights should directly use the values in tons without conversion.
+For example, if the user asks for "coils having a weight of more than 20 tons," the query should directly compare AWEIT > 20, not AWEIT > 20000.
 
+
+question - Number of coils having weight more than 20 tons
+
+SQL:
+SELECT COUNT(*) AS HeavyCoils
+FROM RESULT
+WHERE AWEIT > 20;
 ------------------------------------------------
 5. Average Production Time per Day
 SELECT 
@@ -575,12 +607,12 @@ column_synonyms_with_units = {
     "idle time percentage": {"synonyms": ["idle time percentage", "idle time %", "idle time percentage"], "unit": "%"},
     "production Start Time": {"synonyms": ["Production Start Time", "Coil Start Time", "Rolling Start Time"], "unit": None},
     "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": "min"},
-    "yield":{"synonyms": ["total yield", "yeild","yield"], "unit": "%"},
+    "yield":{"synonyms": ["total yield", "yeild","yield"],"unit":None},
+    "stoppage time":{"synonyms": ["waiting time", "stoppage time","stop time"], "unit": "min"},
     "shift a": {"synonyms": ["shift A", "06:00:00 to 13:59:59"], "unit": None},
     "shift b": {"synonyms": ["shift B", "14:00:00 to 21:59:59"], "unit": None},
     "shift c": {"synonyms": ["shift C", "22:00:00 to 05:59:59"], "unit": None},
 }
-
 
 def check_for_synonyms_with_units(question):
     best_match = None
@@ -607,36 +639,10 @@ def check_for_synonyms_with_units(question):
 
     return best_match, unit
 
-def validate_query_with_gemini(query):
-    """
-    Use Gemini AI to detect ambiguities in the user query and generate recommendations for clarification.
-    """
-    # Prompt Gemini AI to analyze the query
-    clarification_prompt = (
-        "Analyze the following query for ambiguities and generate a list of recommended clarified queries "
-        "to ensure it is meaningful and actionable:\n\n"
-        f"Query: {query}\n\n"
-        "Output:\n1. Identify if the query is ambiguous.\n"
-        "2. Suggest 2-3 clearer versions of the query based on the likely intent.\n"
-    )
-    
-    response = get_gemini_response(clarification_prompt)
-    
-    # Extract details from Gemini's response
-    if "ambiguous" in response.lower():
-        return {
-            "is_valid": False,
-            "recommendations": response.strip()  # Return recommendations generated by Gemini
-        }
-    
-    # If not ambiguous, consider the query valid
-    return {
-        "is_valid": True,
-        "recommendations": None
-    }
-
-
 def map_columns_to_units(query):
+    """
+    Maps column names in the SQL query to their respective units based on predefined synonyms.
+    """
     column_units = {}
     for column, details in column_synonyms_with_units.items():
         for synonym in details["synonyms"]:
@@ -644,12 +650,54 @@ def map_columns_to_units(query):
                 column_units[column] = details["unit"]
     return column_units
 
+def validate_query_with_gemini(query):
+    """
+    Use Gemini to generate a recommendation message for the query.
+    """
+    # Modify the prompt to explicitly ask for a recommendation message
+    clarification_prompt = (
+        "Given the user's query, generate a clear, precise recommendation message "
+        "that captures the intent of the original query. The recommendation should "
+        "be a question or a clear statement of what information the user is seeking.\n\n"
+        "you should try to reduce the scope of the question , make it as narrow as possible "
+        "eg - if the input question is - what was the coil with the heighest thickness then the recommendation should be - what was the coil with the heighest thickness for 27 sept? by such techniques try to limit the users scope to a particulat time frame like day"
+        f"Original Query: {query}\n\n"
+        "try to end the converstaion dont ask for more information \n"
+        "for example -  user question  - difference between the most and least weighted coil \n"
+        "the recommended query should be -  what was the difference between the most and the least weighted coil on a particular day  "
+        "Output a single, concise recommendation message."
+        "is any day is not mentioned then take the day as 27 sept "
+        "there are 2 tables, 1 is results table and the other is setupResults Table:"
+        "STCOD: Steel grade, serves as the link between RESULT and setupResults tables."
+        "RMRG : RM Roll Gap "
+        "RMTHICK : Rolled Bar Thickness"
+        "RMWIDTH : Rolled Bar Width "
+        
+    )
+    
+    # Get the recommendation message from Gemini
+    recommendation = get_gemini_response(clarification_prompt)
+    
+    # Clean and ensure single recommendation
+    recommendations = [recommendation.strip()]
+    
+    return {
+        "original_query": query,
+        "recommendations": recommendations
+    }
+
 def get_gemini_response(question):
+    """
+    Send a query to the Gemini model and get a generated response.
+    """
     model = genai.GenerativeModel('gemini-pro')
     response = model.generate_content([prompt[0], question])
     return response.text
 
 def read_sql_query(sql, db):
+    """
+    Execute an SQL query on the given database and return the results.
+    """
     conn = sqlite3.connect(db)
     cur = conn.cursor()
     cur.execute(sql)
@@ -659,56 +707,134 @@ def read_sql_query(sql, db):
     return rows
 
 
-@app.post("/query")
-async def query(question: Question):
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Process the input query, validate it using Gemini, and return recommendations along with the SQL query and result.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Validate the user query and generate recommendations
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+
+#         # Prepare the response with recommendations only
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+        
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return both the recommendation and query results
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,  # Add query result to the response
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+#  /query 
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Generate and execute SQL query, then return the query and results.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return the SQL query and results
+#         return {
+#             "query": sql_query,
+#             "results": query_results
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+#  for recommendations 
+@app.post("/rec1")
+async def rec1(question: Question):
+    """
+    Validate the query, generate recommendations, and return results as descriptive sentences.
+    """
     try:
-        # Validate the user query using Gemini AI
+        logging.info(f"Validating query: {question.text}")
+
+        # Validate the user query and generate recommendations
         validation_result = validate_query_with_gemini(question.text)
+        logging.info(f"Validation result: {validation_result}")
         
-        # If ambiguous, return recommendations for reconfirmation
-        if not validation_result["is_valid"]:
-            return {
-                "reconfirmation_required": True,
-                "message": validation_result["recommendations"]
-            }
-        
-        # Proceed with query generation and execution
+        # Generate SQL query from Gemini
         sql_query = get_gemini_response(question.text)
-        
-        # Execute the SQL query
-        conn = sqlite3.connect("results.db")
-        cursor = conn.cursor()
-        cursor.execute(sql_query)
-        
-        # Fetch results
-        columns = [description[0] for description in cursor.description]
-        results = cursor.fetchall()
-        conn.close()
-        
-        # Map and format the results
-        column_units = map_columns_to_units(sql_query)
-        formatted_results = []
-        for row in results:
-            formatted_row = []
-            for i, value in enumerate(row):
-                column_name = columns[i].lower()
-                unit = next(
-                    (unit for col, unit in column_units.items() if col.lower() in column_name),
-                    None
-                )
-                formatted_value = f"{value} {unit}" if unit else str(value)
-                formatted_row.append(formatted_value)
-            formatted_results.append(formatted_row)
-        
+        logging.info(f"Generated SQL query: {sql_query}")
+
+        # Execute the SQL query and get results
+        query_results = read_sql_query(sql_query, "results.db")
+        logging.info(f"Query results: {query_results}")
+
+        # Convert query results into descriptive sentences using Gemini
+        description_prompt = (
+            "Based on the following query results, generate a descriptive sentence that conveys the result clearly. "
+            "Ensure the sentence includes relevant information like dates, shifts, or other context.\n\n"
+            f"Query Results: {query_results}\n"
+            f"Query: {sql_query}\n\n"
+            "Output a single, concise sentence in proper English."
+        )
+        descriptive_sentence = get_gemini_response(description_prompt).strip()
+        logging.info(f"Generated description: {descriptive_sentence}")
+
+        # Extract only the recommendations
+        recommendations = validation_result.get("recommendations", [])
+        recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+
+        # Return recommendations, query, results, and descriptive sentence
         return {
+            "recommendations": recommendation_results,
             "query": sql_query,
-            "results": formatted_results,
-            "columns": columns
+            "results": query_results,
+            "description": descriptive_sentence
         }
-    
+
     except Exception as e:
+        logging.error(f"Error occurred during validation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the SQL Query API"}
+
+if __name__ == "__main__":
+    
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+############################################### DO U MEAN ##################################### 
 
 # @app.post("/query")
 # async def query(question: Question):
@@ -765,15 +891,373 @@ async def query(question: Question):
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
 
-   
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the SQL Query API"}
+# @app.get("/")
+# async def root():
+#     return {"message": "Welcome to the SQL Query API"}
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Process the input query, validate it using Gemini, and return recommendations along with the SQL query and result.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Validate the user query and generate recommendations
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+
+#         # Prepare the response with recommendations only
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+        
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return both the recommendation and query results
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,  # Add query result to the response
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+# @app.get("/")
+# async def root():
+#     return {"message": "Welcome to the SQL Query API"}
+
+# if __name__ == "__main__":
+    
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
+   
+
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Process the input query, validate it using Gemini, and return recommendations along with the SQL query and result.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Validate the user query and generate recommendations
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+
+#         # Prepare the response with recommendations only
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+        
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return both the recommendation and query results
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,  # Add query result to the response
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+    
+# @app.get("/")
+# async def root():
+#     return {"message": "Welcome to the SQL Query API"}
+
+# if __name__ == "__main__":
+    
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+#  ----------------------------------------------------------------------------------------
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Process the input query, validate it using Gemini, and return recommendations along with the SQL query and result.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Validate the user query and generate recommendations
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+
+#         # Prepare the response with recommendations only
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+        
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return both the recommendation and query results
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,  # Add query result to the response
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+#------------------------ Production code -------------------
+
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         # Find the best synonym match and its unit
+#         synonym, matched_unit = check_for_synonyms_with_units(question.text)
+        
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+        
+#         # Create "Do you mean" suggestion
+#         do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
+        
+#         # Execute query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         # Get column names and fetch results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map columns to units based on the query
+#         column_units = map_columns_to_units(sql_query)
+        
+#         # Format results with units
+#         formatted_results = []
+#         for row in results:
+#             formatted_row = []
+#             for i, value in enumerate(row):
+#                 # Try to find a unit for the current column
+#                 column_name = columns[i].lower()
+#                 unit = next((
+#                     unit for col, unit in column_units.items() 
+#                     if col.lower() in column_name
+#                 ), None)
+                
+#                 # Format value with unit if found
+#                 formatted_value = f"{value} {unit}" if unit else str(value)
+#                 formatted_row.append(formatted_value)
+            
+#             formatted_results.append(formatted_row)
+        
+#         return {
+#             "query": sql_query,
+#             "do_you_mean": do_you_mean,
+#             "synonym": synonym,
+#             "matched_unit": matched_unit,
+#             "results": formatted_results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+# -------------------------------------------------------
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         validation_result = validate_query_with_gemini(question.text)
+    
+#         sql_query = get_gemini_response(question.text)
+
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         #  results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map results
+#         column_units = map_columns_to_units(sql_query)
+#         formatted_results = []
+#         for row in results:
+#             formatted_row = []
+#             for i, value in enumerate(row):
+#                 column_name = columns[i].lower()
+#                 unit = next(
+#                     (unit for col, unit in column_units.items() if col.lower() in column_name),
+#                     None
+#                 )
+#                 formatted_value = f"{value} {unit}" if unit else str(value)
+#                 formatted_row.append(formatted_value)
+#             formatted_results.append(formatted_row)
+        
+#         # Return recommendations, executed SQL query, and results
+#         return {
+#             "recommendations": validation_result["recommendations"],
+#             "executed_query": sql_query,
+#             "results": formatted_results,
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# -----------------------------------------------------------------------------------------------------------------------
+
+
+# column_synonyms_with_units = {
+#     "count": {"synonyms": ["number", "count", "quantity"], "unit": None},
+#     "date": {"synonyms": ["day", "date", "which day","total number of"], "unit": None},
+#     "slab": {"synonyms": ["input material", "raw material", "slab"], "unit": None},
+#     "slab weight": {"synonyms": ["slab weight", "input weight", "raw material weight"], "unit": "tons"},
+#     "coil": {"synonyms": ["coil","produced","produce" ,"product", "production", "output material", "Batch", "Hot Coil", "Rolled Coil"], "unit": None},
+#     "steel grade": {"synonyms": ["steel grade", "coil grade", "material grade", "tdc grade", "output material grade"], "unit": None},
+#     "coil thickness": {"synonyms": ["coil thickness", "output material thickness", "product thickness", "production thickness", "Batch thickness", "Hot Thickness"], "unit": "mm"},
+#     "coil width": {"synonyms": ["coil width", "output material width", "product width", "production width", "Batch width", "Hot Width"], "unit": "mm"},
+#     "coil weight": {"synonyms": ["coil weight", "output material weight", "product weight", "production weight", "Plant Production", "Hot Metal Produced", "HSM Output", "Rolling Weight", "Hot Rolling Weight"], "unit": "tons"},
+#     "target coil thickness": {"synonyms": ["target coil thickness", "order thickness", "target thickness", "tdc thickness", "Modified Thickness"], "unit": "mm"},
+#     "target coil width": {"synonyms": ["target coil width", "order width", "target width", "tdc width", "Modified Width"], "unit": "mm"},
+#     "line running time": {"synonyms": ["line running time", "Plant Running running time"], "unit": "min"},
+#     "production duration": {"synonyms": ["Production duration", "Coil Running Time", "Time for Production", "Time taken to Produce the coil"], "unit": "min"},
+#     "idle time": {"synonyms": ["idle time", "available time", "total available time"], "unit": "min"},
+#     "running time percentage": {"synonyms": ["running time percentage", "running time %", "running time percentage","line running percentage","line running %"], "unit": "%"},
+#     "idle time percentage": {"synonyms": ["idle time percentage", "idle time %", "idle time percentage"], "unit": "%"},
+#     "production Start Time": {"synonyms": ["Production Start Time", "Coil Start Time", "Rolling Start Time"], "unit": None},
+#     "coil Production Time": {"synonyms": ["Coil Production Time", "Coil End Time", "Rolling End Time", "Time of Production", "Production Time", "Rolling Finish Time", "DC Out Time"], "unit": "min"},
+#     "yield":{"synonyms": ["total yield", "yeild","yield"], "unit": "%"},
+#     "shift a": {"synonyms": ["shift A", "06:00:00 to 13:59:59"], "unit": None},
+#     "shift b": {"synonyms": ["shift B", "14:00:00 to 21:59:59"], "unit": None},
+#     "shift c": {"synonyms": ["shift C", "22:00:00 to 05:59:59"], "unit": None},
+# }
+
+# def check_for_synonyms_with_units(question):
+#     best_match = None
+#     best_match_length = 0
+#     unit = None
+#     question_lower = question.lower()
+
+#     # Explicitly prioritize "count" and "date"
+#     for column in ["count", "date"]:
+#         details = column_synonyms_with_units[column]
+#         for synonym in details["synonyms"]:
+#             synonym_lower = synonym.lower()
+#             if synonym_lower in question_lower:
+#                 return column, details["unit"]  # Return immediately if "count" or "date" matches
+
+#     # If no match for "count" or "date", check other synonyms
+#     for column, details in column_synonyms_with_units.items():
+#         for synonym in details["synonyms"]:
+#             synonym_lower = synonym.lower()
+#             if synonym_lower in question_lower and len(synonym_lower) > best_match_length:
+#                 best_match = column
+#                 best_match_length = len(synonym_lower)
+#                 unit = details["unit"]
+
+#     return best_match, unit
+
+# def map_columns_to_units(query):
+#     """
+#     Maps column names in the SQL query to their respective units based on predefined synonyms.
+#     """
+#     column_units = {}
+#     for column, details in column_synonyms_with_units.items():
+#         for synonym in details["synonyms"]:
+#             if synonym.lower() in query.lower():
+#                 column_units[column] = details["unit"]
+#     return column_units
+
+# @app.post("/query")
+# async def query(question: Question):
+#     try:
+#         # Find the best synonym match and its unit
+#         synonym, matched_unit = check_for_synonyms_with_units(question.text)
+        
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+        
+#         # Create "Do you mean" suggestion
+#         do_you_mean = f"Do you mean '{synonym}'?" if synonym else None
+        
+#         # Execute query
+#         conn = sqlite3.connect("results.db")
+#         cursor = conn.cursor()
+#         cursor.execute(sql_query)
+        
+#         # Get column names and fetch results
+#         columns = [description[0] for description in cursor.description]
+#         results = cursor.fetchall()
+#         conn.close()
+        
+#         # Map columns to units based on the query
+#         column_units = map_columns_to_units(sql_query)
+        
+#         # Format results with units
+#         formatted_results = []
+#         for row in results:
+#             formatted_row = []
+#             for i, value in enumerate(row):
+#                 # Try to find a unit for the current column
+#                 column_name = columns[i].lower()
+#                 unit = next((
+#                     unit for col, unit in column_units.items() 
+#                     if col.lower() in column_name
+#                 ), None)
+                
+#                 # Format value with unit if found
+#                 formatted_value = f"{value} {unit}" if unit else str(value)
+#                 formatted_row.append(formatted_value)
+            
+#             formatted_results.append(formatted_row)
+        
+#         return {
+#             "query": sql_query,
+#             "do_you_mean": do_you_mean,
+#             "synonym": synonym,
+#             "matched_unit": matched_unit,
+#             "results": formatted_results,
+#             "columns": columns
+#         }
+    
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 # def check_for_synonyms_with_units(question):
