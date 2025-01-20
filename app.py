@@ -1,5 +1,3 @@
-
-
 # # fastAPI WITH NEXTJS
 
 import json
@@ -32,14 +30,20 @@ app.add_middleware(
 class Question(BaseModel):
     text: str
 
-
 prompt = [
     '''
 You are an expert in converting English questions to SQL queries! The SQL database contains 2 tables named RESULT and setupResults with the following columns and COIL as the foreign key for the setup_results tablke to connect the 2 tables:
 based on the columns of the 2 tables, generate query note that if needed then join the tables to generate the query.
-do not include " ``` "  or any other extra character in your answer , just provide the sql query .  
+Do not include " ``` "  or any other extra character in your answer , just provide the sql query .  
+
 Consider a day to start at 6:00 AM and end at 5:59 AM the following day. Given a specific date, generate an SQL query to retrieve data within this 24-hour window, accounting for shift-based production.
 When a question involves a specific date, interpret the date range as follows:
+
+Always ensure the following:
+1. Use explicit table names or aliases for all columns to avoid ambiguity.
+2. If the query involves conditions on dates, interpret the day as starting at 6:00 AM and ending at 5:59 AM the following day.
+3. If a column exists in both tables (e.g., `COIL`), always qualify it with the table name (e.g., `RESULT.COIL` or `setupResults.COIL`).
+
 
 The day begins at 6:00 AM of the given date and ends at 6:00 AM the next day.
 For example:
@@ -68,7 +72,7 @@ results table -
 
 setupResults Table:
 
-STCOD: Steel grade, serves as the link between RESULT and setupResults tables.
+COIL : Coil/COIL ID acts as the column to join the 2 tables and form relations.
 RMRG : RM Roll Gap 
 RMTHICK : Rolled Bar Thickness
 RMWIDTH : Rolled Bar Width 
@@ -81,7 +85,7 @@ Additional concepts:
 3. Running Time Percentage (%) = (Line Running Time / Total available time) * 100
 4. Idle Time Percentage (%) = (Idle Time / Total available time) * 100
 5. Production time = DATEE
- i.e. - the time of creation of coil
+i.e. - the time of creation of coil
 
 
 example queries  - 
@@ -744,6 +748,15 @@ def validate_query_with_gemini(query):
         "that captures the intent of the original query. The recommendation should "
         "be a question or a clear statement of what information the user is seeking.\n\n"
         "you should try to reduce the scope of the question , make it as narrow as possible "
+        "do not ask any further question"
+        "there are 2 tables, 1 is results table and the other is setupResults Table:"
+        "STCOD: Steel grade, serves as the link between RESULT and setupResults tables."
+        "RMRG : RM Roll Gap "
+        "RMTHICK : Rolled Bar Thickness"
+        "RMWIDTH : Rolled Bar Width "
+        "unless explicit words lke RM Rolled Bar Thickness or Rolled Bar Width is asked in the question then treat it as coil "
+        "if the question contains RM Roll Gap or Rolled Bar Thickness or Rolled Bar Width then frame question accordingly "
+        "unless words like RM Rolled Gap,Rolled Bar Thickness,Rolled Bar Width is asked in the question, then only recommend about the setupResults table  "
         "eg - if the input question is - what was the coil with the heighest thickness then the recommendation should be - what was the coil with the heighest thickness for 27 sept? by such techniques try to limit the users scope to a particulat time frame like day"
         f"Original Query: {query}\n\n"
         "try to end the converstaion dont ask for more information \n"
@@ -752,15 +765,7 @@ def validate_query_with_gemini(query):
         "Output a single, concise recommendation message."
         "for any question asked related to the setupResults like , the Rolled Bar Thickness,Rolled Bar width,RM Roll Gap don not give any datte as it already has the coilID in the question "
         "is any day is not mentioned then take the day as 27 sept "
-        "there are 2 tables, 1 is results table and the other is setupResults Table:"
-        "STCOD: Steel grade, serves as the link between RESULT and setupResults tables."
-        "RMRG : RM Roll Gap "
-        "RMTHICK : Rolled Bar Thickness"
-        "RMWIDTH : Rolled Bar Width "
-        "if the question contains RM Roll Gap or Rolled Bar Thickness or Rolled Bar Width then frame question accordingly "
-        
     )
-    
     # Get the recommendation message from Gemini
     recommendation = get_gemini_response(clarification_prompt)
     
@@ -772,14 +777,6 @@ def validate_query_with_gemini(query):
         "recommendations": recommendations
     }
 
-# generate the query
-# def get_gemini_response(question):
-#     """
-#     Send a query to the Gemini model and get a generated response.
-#     """
-#     model = genai.GenerativeModel('gemini-pro')
-#     response = model.generate_content([prompt[0], question])
-#     return response.text
 
 def get_gemini_response(question):
     """
@@ -805,8 +802,6 @@ def get_gemini_response(question):
         logging.error(f"Error in get_gemini_response: {str(e)}")
         raise
 
-
-
 # Running query on the DB
 def read_sql_query(sql, db):
     """
@@ -819,6 +814,266 @@ def read_sql_query(sql, db):
     conn.commit()
     conn.close()
     return rows
+
+@app.post("/rec1")
+async def rec1(question: Question):
+    """
+    Validate the query, generate recommendations, and dynamically return results 
+    as descriptive text, a table, or graph data for Chart.js.
+    """
+    try:
+        logging.info(f"Validating query: {question.text}")
+
+        # Validate the user query
+        validation_result = validate_query_with_gemini(question.text)
+        logging.info(f"Validation result: {validation_result}")
+
+        # Generate SQL query 
+        sql_query = get_gemini_response(question.text)
+        logging.info(f"Generated SQL query: {sql_query}")
+
+        # Executes SQL query
+        query_results = read_sql_query(sql_query, "results.db")
+        logging.info(f"Query results: {query_results}")
+
+        # output format (text, table, or graph)
+        output_decision_prompt = (
+            "You are an assistant generating structured outputs. Based on the query results below, "
+            "determine the most suitable output format (table, text, or graph). If a graph is possible, "
+            "specify 'labels' and 'values' for plotting using Chart.js. Otherwise, create a JSON object "
+            "for a table or descriptive text.\n\n"
+            "For example:\n"
+            "1. Table format:\n"
+            "{\n"
+            '  "format": "table",\n'
+            '  "content": {\n'
+            '    "headers": ["Column1", "Column2"],\n'
+            '    "rows": [["Value1", "Value2"], ["Value3", "Value4"]]\n'
+            "  }\n"
+            "}\n\n"
+            "2. Text format:\n"
+            "{\n"
+            '  "format": "text",\n'
+            '  "content": "Description of the query results."\n'
+            "}\n\n"
+            "3. Graph format:\n"
+            "{\n"
+            '  "format": "graph",\n'
+            '  "content": {\n'
+            '    "labels": ["Label1", "Label2"],\n'
+            '    "values": [Value1, Value2]\n'
+            "  }\n"
+            "}\n\n"
+            f"Query Results: {query_results}\n"
+        )
+
+        gemini_output = get_gemini_response(output_decision_prompt)
+        logging.info(f"Gemini output: {gemini_output}")
+
+        # Parse Gemini's response
+        gemini_decision = json.loads(gemini_output)
+        output_format = gemini_decision.get("format")
+        output_content = gemini_decision.get("content")
+
+        if output_format == "table":
+            # headers and rows
+            table_data = output_content if isinstance(output_content, dict) else {}
+            response_data = {
+                "format": "table",
+                "headers": table_data.get("headers", []),
+                "rows": table_data.get("rows", [])
+            }
+        elif output_format == "text":
+            response_data = {
+                "format": "text",
+                "description": output_content
+            }
+        elif output_format == "graph":
+            # labels and values
+            graph_data = output_content if isinstance(output_content, dict) else {}
+            response_data = {
+                "format": "graph",
+                "labels": graph_data.get("labels", []),
+                "values": graph_data.get("values", [])
+            }
+        else:
+            raise ValueError("Invalid format returned by Gemini.")
+
+        # Extract recommendations
+        recommendations = validation_result.get("recommendations", [])
+        recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+
+        # Combine recommendations, query results, and response data
+        return {
+            "recommendations": recommendation_results,
+            "query": sql_query,
+            "results": query_results,
+            "gemini_output": response_data
+        }
+
+    except Exception as e:
+        logging.error(f"Error occurred during validation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the SQL Query API"}
+
+if __name__ == "__main__":
+    
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
+# @app.post("/rec1")
+# async def rec1(question: Question):
+#     """
+#     Validate the query, generate recommendations, and dynamically return results 
+#     as either descriptive text or a table based on Gemini's output.
+#     """
+#     try:
+#         logging.info(f"Validating query: {question.text}")
+
+#         # Validate the user query
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
+
+#         # Generate SQL query from Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Create a prompt for Gemini to dynamically decide output format
+#         output_decision_prompt = (
+#             "You are an assistant generating structured outputs. Based on the query results below, "
+#             "create a JSON object for a table with 'headers' and 'rows', or generate a descriptive text. "
+#             "the headers should be name of columns, which is asked in the question"
+#             "if the question is - What is RM Roll Gap, Rolled Bar Thickness and steel grade for coils having weight above 20 tons on 27 September?"
+#             "then the headers should be - RM Roll gap, Rolled Bar Thickness , coil grade"
+#             "Respond in one of these formats:\n\n"
+#             "{\n"
+#             '  "format": "table",\n'
+#             '  "content": {\n'
+#             '    "headers": ["Column1", "Column2"],\n'
+#             '    "rows": [["Value1", "Value2"], ["Value3", "Value4"]]\n'
+#             "  }\n"
+#             "}\n\n"
+#             "{\n"
+#             '  "format": "text",\n'
+#             '  "content": "Description of the query results."\n'
+#             "}\n\n"
+#             f"Query Results: {query_results}\n"
+#         )
+
+
+#         gemini_output = get_gemini_response(output_decision_prompt)
+#         logging.info(f"Gemini output: {gemini_output}")
+
+#         # Parse Gemini's response
+#         gemini_decision = json.loads(gemini_output)
+#         output_format = gemini_decision.get("format")
+#         output_content = gemini_decision.get("content")
+
+#         if output_format == "table":
+#             # Ensure table format has headers and rows
+#             table_data = output_content if isinstance(output_content, dict) else {}
+#             response_data = {
+#                 "format": "table",
+#                 "headers": table_data.get("headers", []),
+#                 "rows": table_data.get("rows", [])
+#             }
+#         elif output_format == "text":
+#             response_data = {
+#                 "format": "text",
+#                 "description": output_content
+#             }
+#         else:
+#             raise ValueError("Invalid format returned by Gemini.")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+
+#         # Combine recommendations and response data
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,
+#             "gemini_output": response_data
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred during validation: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# generate the query
+# def get_gemini_response(question):
+#     """
+#     Send a query to the Gemini model and get a generated response.
+#     """
+#     model = genai.GenerativeModel('gemini-pro')
+#     response = model.generate_content([prompt[0], question])
+#     return response.text
+
+#  /query 
+# @app.post("/query")
+# async def query(question: Question):
+#     """
+#     Generate and execute SQL query, then return the query and results.
+#     """
+#     try:
+#         logging.info(f"Received query: {question.text}")
+
+#         # Generate SQL query using Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
+
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
+
+#         # Return the SQL query and results
+#         return {
+#             "query": sql_query,
+#             "results": query_results
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# generate the query
+# def get_gemini_response(question):
+#     """
+#     Send a query to the Gemini model and get a response.
+#     """
+#     try:
+#         logging.info(f"Sending query to Gemini: {question}")
+#         # Simulated Gemini API call
+#         model = genai.GenerativeModel("gemini-pro")
+#         response = model.generate_content([question])
+#         response_text = response.text.strip()
+
+#         if not response_text:
+#             raise ValueError("Empty response received from Gemini.")
+#         return response_text
+
+#     except Exception as e:
+#         logging.error(f"Error in Gemini response: {str(e)}")
+#         raise
+
 
 
 # @app.post("/query")
@@ -858,34 +1113,6 @@ def read_sql_query(sql, db):
 #         logging.error(f"Error occurred: {str(e)}")
 #         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-#  /query 
-@app.post("/query")
-async def query(question: Question):
-    """
-    Generate and execute SQL query, then return the query and results.
-    """
-    try:
-        logging.info(f"Received query: {question.text}")
-
-        # Generate SQL query using Gemini
-        sql_query = get_gemini_response(question.text)
-        logging.info(f"Generated SQL query: {sql_query}")
-
-        # Execute the SQL query and get results
-        query_results = read_sql_query(sql_query, "results.db")
-        logging.info(f"Query results: {query_results}")
-
-        # Return the SQL query and results
-        return {
-            "query": sql_query,
-            "results": query_results
-        }
-
-    except Exception as e:
-        logging.error(f"Error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 #  for recommendations 
@@ -938,96 +1165,89 @@ async def query(question: Question):
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/rec1")
-async def rec1(question: Question):
-    """
-    Validate the query, generate recommendations, and dynamically return results 
-    as either descriptive text or a table based on Gemini's output.
-    """
-    try:
-        logging.info(f"Validating query: {question.text}")
-
-        # Validate the user query
-        validation_result = validate_query_with_gemini(question.text)
-        logging.info(f"Validation result: {validation_result}")
-
-        # Generate SQL query from Gemini
-        sql_query = get_gemini_response(question.text)
-        logging.info(f"Generated SQL query: {sql_query}")
-
-        # Execute the SQL query and get results
-        query_results = read_sql_query(sql_query, "results.db")
-        logging.info(f"Query results: {query_results}")
-
-        # Create a prompt for Gemini to dynamically decide output format
-        output_decision_prompt = (
-    "You are an assistant generating structured outputs. Based on the query results below, "
-    "create a JSON object for a table with 'headers' and 'rows', or generate a descriptive text. "
-    "Respond in one of these formats:\n\n"
-    "{\n"
-    '  "format": "table",\n'
-    '  "content": {\n'
-    '    "headers": ["Column1", "Column2"],\n'
-    '    "rows": [["Value1", "Value2"], ["Value3", "Value4"]]\n'
-    "  }\n"
-    "}\n\n"
-    "{\n"
-    '  "format": "text",\n'
-    '  "content": "Description of the query results."\n'
-    "}\n\n"
-    f"Query Results: {query_results}\n"
-)
 
 
-        gemini_output = get_gemini_response(output_decision_prompt)
-        logging.info(f"Gemini output: {gemini_output}")
+# @app.post("/rec1")
+# async def rec1(question: Question):
+#     """
+#     Validate the query, generate recommendations, and dynamically return results 
+#     as either descriptive text or a table based on Gemini's output.
+#     """
+#     try:
+#         logging.info(f"Validating query: {question.text}")
 
-        # Parse Gemini's response
-        gemini_decision = json.loads(gemini_output)
-        output_format = gemini_decision.get("format")
-        output_content = gemini_decision.get("content")
+#         # Validate the user query
+#         validation_result = validate_query_with_gemini(question.text)
+#         logging.info(f"Validation result: {validation_result}")
 
-        if output_format == "table":
-            # Ensure table format has headers and rows
-            table_data = output_content if isinstance(output_content, dict) else {}
-            response_data = {
-                "format": "table",
-                "headers": table_data.get("headers", []),
-                "rows": table_data.get("rows", [])
-            }
-        elif output_format == "text":
-            response_data = {
-                "format": "text",
-                "description": output_content
-            }
-        else:
-            raise ValueError("Invalid format returned by Gemini.")
+#         # Generate SQL query from Gemini
+#         sql_query = get_gemini_response(question.text)
+#         logging.info(f"Generated SQL query: {sql_query}")
 
-        # Extract only the recommendations
-        recommendations = validation_result.get("recommendations", [])
-        recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+#         # Execute the SQL query and get results
+#         query_results = read_sql_query(sql_query, "results.db")
+#         logging.info(f"Query results: {query_results}")
 
-        # Combine recommendations and response data
-        return {
-            "recommendations": recommendation_results,
-            "query": sql_query,
-            "results": query_results,
-            "gemini_output": response_data
-        }
-
-    except Exception as e:
-        logging.error(f"Error occurred during validation: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+#         # Create a prompt for Gemini to dynamically decide output format
+#         output_decision_prompt = (
+#     "You are an assistant generating structured outputs. Based on the query results below, "
+#     "create a JSON object for a table with 'headers' and 'rows', or generate a descriptive text. "
+#     "Respond in one of these formats:\n\n"
+#     "{\n"
+#     '  "format": "table",\n'
+#     '  "content": {\n'
+#     '    "headers": ["Column1", "Column2"],\n'
+#     '    "rows": [["Value1", "Value2"], ["Value3", "Value4"]]\n'
+#     "  }\n"
+#     "}\n\n"
+#     "{\n"
+#     '  "format": "text",\n'
+#     '  "content": "Description of the query results."\n'
+#     "}\n\n"
+#     f"Query Results: {query_results}\n"
+# )
 
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the SQL Query API"}
+#         gemini_output = get_gemini_response(output_decision_prompt)
+#         logging.info(f"Gemini output: {gemini_output}")
 
-if __name__ == "__main__":
-    
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+#         # Parse Gemini's response
+#         gemini_decision = json.loads(gemini_output)
+#         output_format = gemini_decision.get("format")
+#         output_content = gemini_decision.get("content")
+
+#         if output_format == "table":
+#             # Ensure table format has headers and rows
+#             table_data = output_content if isinstance(output_content, dict) else {}
+#             response_data = {
+#                 "format": "table",
+#                 "headers": table_data.get("headers", []),
+#                 "rows": table_data.get("rows", [])
+#             }
+#         elif output_format == "text":
+#             response_data = {
+#                 "format": "text",
+#                 "description": output_content
+#             }
+#         else:
+#             raise ValueError("Invalid format returned by Gemini.")
+
+#         # Extract only the recommendations
+#         recommendations = validation_result.get("recommendations", [])
+#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
+
+#         # Combine recommendations and response data
+#         return {
+#             "recommendations": recommendation_results,
+#             "query": sql_query,
+#             "results": query_results,
+#             "gemini_output": response_data
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error occurred during validation: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
