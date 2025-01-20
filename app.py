@@ -1,7 +1,6 @@
-
-
 # # fastAPI WITH NEXTJS
 
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -31,13 +30,20 @@ app.add_middleware(
 class Question(BaseModel):
     text: str
 
-
 prompt = [
     '''
-You are an expert in converting English questions to SQL queries! The SQL database contains 2 tables named RESULT and setupResults with the following columns and COIL as the primary key to connect the 2 tables:
+You are an expert in converting English questions to SQL queries! The SQL database contains 2 tables named RESULT and setupResults with the following columns and COIL as the foreign key for the setup_results tablke to connect the 2 tables:
 based on the columns of the 2 tables, generate query note that if needed then join the tables to generate the query.
+Do not include " ``` "  or any other extra character in your answer , just provide the sql query .  
+
 Consider a day to start at 6:00 AM and end at 5:59 AM the following day. Given a specific date, generate an SQL query to retrieve data within this 24-hour window, accounting for shift-based production.
 When a question involves a specific date, interpret the date range as follows:
+
+Always ensure the following:
+1. Use explicit table names or aliases for all columns to avoid ambiguity.
+2. If the query involves conditions on dates, interpret the day as starting at 6:00 AM and ending at 5:59 AM the following day.
+3. If a column exists in both tables (e.g., `COIL`), always qualify it with the table name (e.g., `RESULT.COIL` or `setupResults.COIL`).
+
 
 The day begins at 6:00 AM of the given date and ends at 6:00 AM the next day.
 For example:
@@ -66,7 +72,7 @@ results table -
 
 setupResults Table:
 
-STCOD: Steel grade, serves as the link between RESULT and setupResults tables.
+COIL : Coil/COIL ID acts as the column to join the 2 tables and form relations.
 RMRG : RM Roll Gap 
 RMTHICK : Rolled Bar Thickness
 RMWIDTH : Rolled Bar Width 
@@ -79,16 +85,96 @@ Additional concepts:
 3. Running Time Percentage (%) = (Line Running Time / Total available time) * 100
 4. Idle Time Percentage (%) = (Idle Time / Total available time) * 100
 5. Production time = DATEE
- i.e. - the time of creation of coil
+i.e. - the time of creation of coil
 
 
-example - 
+example queries  - 
+
+Question - what is RM Thick for coil NA001311
+
+SQL: 
 SELECT setupResults.RMTHICK 
 FROM RESULT 
 JOIN setupResults ON RESULT.COIL = setupResults.COIL 
 WHERE RESULT.COIL = 'NA001311';
 
- 
+
+Question - what is the Rolled Bar WIDTH for coil NA001311
+
+SQL: 
+SELECT setupResults.RMWIDTH
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE RESULT.COIL = 'NA001311';
+
+
+Question: List the coil and its rolled bar width for coils where the rolled bar width is greater than 1600 mm
+SQL: 
+SELECT setupResults.COIL, setupResults.RMWIDTH 
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE setupResults.RMWIDTH > 1600;
+
+
+Question: coil IDs and rolled bar widths for coils with rolled bar widths between 1600 mm and 2000 mm
+
+SQL:
+SELECT setupResults.COIL, setupResults.RMWIDTH 
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE setupResults.RMWIDTH BETWEEN 1600 AND 2000;
+
+Question: What is the total slab weight for coils with rolled bar widths greater than 1800 mm?
+SQL: 
+SELECT SUM(RESULT.S_WEIGHT) AS total_weight 
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE setupResults.RMWIDTH > 1800;
+
+Question : Find the maximum slab weight for coils with rolled bar widths between 1500 mm and 2000 mm.
+SQL: 
+SELECT MAX(RESULT.S_WEIGHT) AS max_weight 
+FROM RESULT 
+JOIN setupResults ON RESULT.COIL = setupResults.COIL 
+WHERE setupResults.RMWIDTH BETWEEN 1500 AND 2000;
+
+Question:  Get the coil IDs for coils with rolled bar thickness between 35 mm and 45 mm and rolled bar width greater than 1600 mm.
+SQL :
+SELECT setupResults.COIL 
+FROM setupResults 
+WHERE setupResults.RMTHICK BETWEEN 35 AND 45 
+AND setupResults.RMWIDTH > 1600;
+
+Question: what is the average rolled bar thickness for E250Br grade coils
+SQL: 
+SELECT AVG(setupResults.RMTHICK) AS Average_Rolled_Bar_Thickness
+FROM RESULT
+JOIN setupResults ON RESULT.COIL = setupResults.COIL
+WHERE RESULT.STCOD = 'E250Br';
+
+Question :List all coils with E350Br grade and RM Roll Gap between 50 and 100.
+SQl :
+SELECT RESULT.COIL, setupResults.RMRG
+FROM RESULT
+JOIN setupResults ON RESULT.COIL = setupResults.COIL
+WHERE RESULT.STCOD = 'E350Br' AND setupResults.RMRG BETWEEN 50 AND 100;
+
+What is the maximum RM Roll Gap for coils produced on 27 September 2024?
+SQL:
+SELECT MAX(setupResults.RMRG) AS Max_RM_Roll_Gap
+FROM RESULT
+JOIN setupResults ON RESULT.COIL = setupResults.COIL
+WHERE DATEE >= '2024-09-27 06:00:00' AND DATEE < '2024-09-28 06:00:00';
+
+Question: what are the coils having coil weight above 20tons and rolled bar thickness above 40mm
+SQL:
+SELECT setupResults.COIL
+FROM RESULT
+JOIN setupResults ON RESULT.COIL = setupResults.COIL
+WHERE RESULT.AWEIT > 20
+AND setupResults.RMTHICK> 40;
+
+
 IMPORTANT:
 Do not include any markdown formatting, code block indicators (like ```), or the word 'sql' in your response.
 Provide only the SQL query text, without any additional explanations or comments.
@@ -650,6 +736,8 @@ def map_columns_to_units(query):
                 column_units[column] = details["unit"]
     return column_units
 
+
+# recommendation 
 def validate_query_with_gemini(query):
     """
     Use Gemini to generate a recommendation message for the query.
@@ -660,21 +748,24 @@ def validate_query_with_gemini(query):
         "that captures the intent of the original query. The recommendation should "
         "be a question or a clear statement of what information the user is seeking.\n\n"
         "you should try to reduce the scope of the question , make it as narrow as possible "
+        "do not ask any further question"
+        "there are 2 tables, 1 is results table and the other is setupResults Table:"
+        "STCOD: Steel grade, serves as the link between RESULT and setupResults tables."
+        "RMRG : RM Roll Gap "
+        "RMTHICK : Rolled Bar Thickness"
+        "RMWIDTH : Rolled Bar Width "
+        "unless explicit words lke RM Rolled Bar Thickness or Rolled Bar Width is asked in the question then treat it as coil "
+        "if the question contains RM Roll Gap or Rolled Bar Thickness or Rolled Bar Width then frame question accordingly "
+        "unless words like RM Rolled Gap,Rolled Bar Thickness,Rolled Bar Width is asked in the question, then only recommend about the setupResults table  "
         "eg - if the input question is - what was the coil with the heighest thickness then the recommendation should be - what was the coil with the heighest thickness for 27 sept? by such techniques try to limit the users scope to a particulat time frame like day"
         f"Original Query: {query}\n\n"
         "try to end the converstaion dont ask for more information \n"
         "for example -  user question  - difference between the most and least weighted coil \n"
         "the recommended query should be -  what was the difference between the most and the least weighted coil on a particular day  "
         "Output a single, concise recommendation message."
+        "for any question asked related to the setupResults like , the Rolled Bar Thickness,Rolled Bar width,RM Roll Gap don not give any datte as it already has the coilID in the question "
         "is any day is not mentioned then take the day as 27 sept "
-        "there are 2 tables, 1 is results table and the other is setupResults Table:"
-        "STCOD: Steel grade, serves as the link between RESULT and setupResults tables."
-        "RMRG : RM Roll Gap "
-        "RMTHICK : Rolled Bar Thickness"
-        "RMWIDTH : Rolled Bar Width "
-        
     )
-    
     # Get the recommendation message from Gemini
     recommendation = get_gemini_response(clarification_prompt)
     
@@ -686,14 +777,32 @@ def validate_query_with_gemini(query):
         "recommendations": recommendations
     }
 
+
 def get_gemini_response(question):
     """
     Send a query to the Gemini model and get a generated response.
     """
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content([prompt[0], question])
-    return response.text
+    try:
+        logging.info(f"Sending query to Gemini: {question}")
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content([prompt[0], question])
 
+        # Log raw response for debugging
+        logging.info(f"Gemini response: {response}")
+
+        # Extract and return the text from the response
+        response_text = response.text
+        if not response_text:
+            raise ValueError("Empty response received from Gemini.")
+
+        logging.info(f"Extracted Gemini text: {response_text}")
+        return response_text
+
+    except Exception as e:
+        logging.error(f"Error in get_gemini_response: {str(e)}")
+        raise
+
+# Running query on the DB
 def read_sql_query(sql, db):
     """
     Execute an SQL query on the given database and return the results.
@@ -706,122 +815,105 @@ def read_sql_query(sql, db):
     conn.close()
     return rows
 
-
-# @app.post("/query")
-# async def query(question: Question):
-#     """
-#     Process the input query, validate it using Gemini, and return recommendations along with the SQL query and result.
-#     """
-#     try:
-#         logging.info(f"Received query: {question.text}")
-
-#         # Generate SQL query using Gemini
-#         sql_query = get_gemini_response(question.text)
-#         logging.info(f"Generated SQL query: {sql_query}")
-
-#         # Validate the user query and generate recommendations
-#         validation_result = validate_query_with_gemini(question.text)
-#         logging.info(f"Validation result: {validation_result}")
-
-#         # Extract only the recommendations
-#         recommendations = validation_result.get("recommendations", [])
-
-#         # Prepare the response with recommendations only
-#         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
-        
-#         # Execute the SQL query and get results
-#         query_results = read_sql_query(sql_query, "results.db")
-#         logging.info(f"Query results: {query_results}")
-
-#         # Return both the recommendation and query results
-#         return {
-#             "recommendations": recommendation_results,
-#             "query": sql_query,
-#             "results": query_results,  # Add query result to the response
-#         }
-
-#     except Exception as e:
-#         logging.error(f"Error occurred: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-#  /query 
-# @app.post("/query")
-# async def query(question: Question):
-#     """
-#     Generate and execute SQL query, then return the query and results.
-#     """
-#     try:
-#         logging.info(f"Received query: {question.text}")
-
-#         # Generate SQL query using Gemini
-#         sql_query = get_gemini_response(question.text)
-#         logging.info(f"Generated SQL query: {sql_query}")
-
-#         # Execute the SQL query and get results
-#         query_results = read_sql_query(sql_query, "results.db")
-#         logging.info(f"Query results: {query_results}")
-
-#         # Return the SQL query and results
-#         return {
-#             "query": sql_query,
-#             "results": query_results
-#         }
-
-#     except Exception as e:
-#         logging.error(f"Error occurred: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-#  for recommendations 
 @app.post("/rec1")
 async def rec1(question: Question):
     """
-    Validate the query, generate recommendations, and return results as descriptive sentences.
+    Validate the query, generate recommendations, and dynamically return results 
+    as descriptive text, a table, or graph data for Chart.js.
     """
     try:
         logging.info(f"Validating query: {question.text}")
 
-        # Validate the user query and generate recommendations
+        # Validate the user query
         validation_result = validate_query_with_gemini(question.text)
         logging.info(f"Validation result: {validation_result}")
-        
-        # Generate SQL query from Gemini
+
+        # Generate SQL query 
         sql_query = get_gemini_response(question.text)
         logging.info(f"Generated SQL query: {sql_query}")
 
-        # Execute the SQL query and get results
+        # Executes SQL query
         query_results = read_sql_query(sql_query, "results.db")
         logging.info(f"Query results: {query_results}")
 
-        # Convert query results into descriptive sentences using Gemini
-        description_prompt = (
-            "Based on the following query results, generate a descriptive sentence that conveys the result clearly. "
-            "Ensure the sentence includes relevant information like dates, shifts, or other context.\n\n"
+        # output format (text, table, or graph)
+        output_decision_prompt = (
+            "You are an assistant generating structured outputs. Based on the query results below, "
+            "determine the most suitable output format (table, text, or graph). If a graph is possible, "
+            "specify 'labels' and 'values' for plotting using Chart.js. Otherwise, create a JSON object "
+            "for a table or descriptive text.\n\n"
+            "For example:\n"
+            "1. Table format:\n"
+            "{\n"
+            '  "format": "table",\n'
+            '  "content": {\n'
+            '    "headers": ["Column1", "Column2"],\n'
+            '    "rows": [["Value1", "Value2"], ["Value3", "Value4"]]\n'
+            "  }\n"
+            "}\n\n"
+            "2. Text format:\n"
+            "{\n"
+            '  "format": "text",\n'
+            '  "content": "Description of the query results."\n'
+            "}\n\n"
+            "3. Graph format:\n"
+            "{\n"
+            '  "format": "graph",\n'
+            '  "content": {\n'
+            '    "labels": ["Label1", "Label2"],\n'
+            '    "values": [Value1, Value2]\n'
+            "  }\n"
+            "}\n\n"
             f"Query Results: {query_results}\n"
-            f"Query: {sql_query}\n\n"
-            "Output a single, concise sentence in proper English."
         )
-        descriptive_sentence = get_gemini_response(description_prompt).strip()
-        logging.info(f"Generated description: {descriptive_sentence}")
 
-        # Extract only the recommendations
+        gemini_output = get_gemini_response(output_decision_prompt)
+        logging.info(f"Gemini output: {gemini_output}")
+
+        # Parse Gemini's response
+        gemini_decision = json.loads(gemini_output)
+        output_format = gemini_decision.get("format")
+        output_content = gemini_decision.get("content")
+
+        if output_format == "table":
+            # headers and rows
+            table_data = output_content if isinstance(output_content, dict) else {}
+            response_data = {
+                "format": "table",
+                "headers": table_data.get("headers", []),
+                "rows": table_data.get("rows", [])
+            }
+        elif output_format == "text":
+            response_data = {
+                "format": "text",
+                "description": output_content
+            }
+        elif output_format == "graph":
+            # labels and values
+            graph_data = output_content if isinstance(output_content, dict) else {}
+            response_data = {
+                "format": "graph",
+                "labels": graph_data.get("labels", []),
+                "values": graph_data.get("values", [])
+            }
+        else:
+            raise ValueError("Invalid format returned by Gemini.")
+
+        # Extract recommendations
         recommendations = validation_result.get("recommendations", [])
         recommendation_results = [{"recommendation_message": rec} for rec in recommendations]
 
-        # Return recommendations, query, results, and descriptive sentence
+        # Combine recommendations, query results, and response data
         return {
             "recommendations": recommendation_results,
             "query": sql_query,
             "results": query_results,
-            "description": descriptive_sentence
+            "gemini_output": response_data
         }
 
     except Exception as e:
         logging.error(f"Error occurred during validation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/")
 async def root():
@@ -831,6 +923,11 @@ if __name__ == "__main__":
     
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
 
 
 
