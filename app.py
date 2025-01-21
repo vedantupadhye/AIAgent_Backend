@@ -1,4 +1,5 @@
 # # fastAPI WITH NEXTJS
+# # fastAPI WITH NEXTJS
 
 import json
 from fastapi import FastAPI, HTTPException
@@ -736,7 +737,6 @@ def map_columns_to_units(query):
                 column_units[column] = details["unit"]
     return column_units
 
-
 # recommendation 
 def validate_query_with_gemini(query):
     """
@@ -760,11 +760,7 @@ def validate_query_with_gemini(query):
         "eg - if the input question is - what was the coil with the heighest thickness then the recommendation should be - what was the coil with the heighest thickness for 27 sept? by such techniques try to limit the users scope to a particulat time frame like day"
         f"Original Query: {query}\n\n"
         "try to end the converstaion dont ask for more information \n"
-        "for example -  user question  - difference between the most and least weighted coil \n"
-        "the recommended query should be -  what was the difference between the most and the least weighted coil on a particular day  "
-        "Output a single, concise recommendation message."
-        "for any question asked related to the setupResults like , the Rolled Bar Thickness,Rolled Bar width,RM Roll Gap don not give any datte as it already has the coilID in the question "
-        "is any day is not mentioned then take the day as 27 sept "
+       
     )
     # Get the recommendation message from Gemini
     recommendation = get_gemini_response(clarification_prompt)
@@ -776,7 +772,6 @@ def validate_query_with_gemini(query):
         "original_query": query,
         "recommendations": recommendations
     }
-
 
 def get_gemini_response(question):
     """
@@ -923,10 +918,6 @@ if __name__ == "__main__":
     
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
 
 
 
