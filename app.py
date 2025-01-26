@@ -77,7 +77,6 @@ RMRG : RM Roll Gap
 RMTHICK : Rolled Bar Thickness
 RMWIDTH : Rolled Bar Width 
 
-
 quality Table:
 
 COIL : Coil/COIL ID acts as the column to join the 3 tables and form relations.
