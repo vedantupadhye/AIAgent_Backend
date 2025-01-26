@@ -8,10 +8,10 @@ cursor = conn.cursor()
 quality_table_info = """
 CREATE TABLE IF NOT EXISTS quality (
     COIL VARCHAR(10) PRIMARY KEY,                -- Primary key referencing RESULT(COIL)
-    CRT INT CHECK (CRT BETWEEN 1 AND 25),       -- Number between 1 and 25
-    FRT INT CHECK (FRT BETWEEN 1 AND 25),       -- Number between 1 and 25
-    elongation INT CHECK (elongation BETWEEN 1 AND 25), -- Number between 1 and 25
-    TensileStrength INT CHECK (TensileStrength BETWEEN 1 AND 25), -- Number between 1 and 25
+    CRT INT ,       -- Number between 1 and 25
+    FRT INT ,       -- Number between 1 and 25
+    elongation INT , -- Number between 1 and 25
+    TensileStrength INT, -- Number between 1 and 25
     FOREIGN KEY (COIL) REFERENCES RESULT(COIL)
 );
 """

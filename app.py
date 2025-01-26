@@ -81,9 +81,9 @@ RMWIDTH : Rolled Bar Width
 quality Table:
 
 COIL : Coil/COIL ID acts as the column to join the 3 tables and form relations.
-CRT 
-elongation 
-TensileStrength 
+CRT : Cathode Ray Tube
+elongation :
+TensileStrength :
 
 Do not include any markdown formatting, code block indicators (like ```), or the word 'sql' in your response.
 
