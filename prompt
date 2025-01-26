@@ -43,8 +43,14 @@ Instructions:
 - For good quality:
     - CTHICK is within +/- 0.013 of OTHICK.
     - CWIDTH is within +13 of OWIDTH.
-    
-    
+
+quality Table:
+
+COIL : Coil/COIL ID acts as the column to join the 3 tables and form relations.
+CRT : Cathode Ray Tube
+elongation :
+TensileStrength :
+
 example prompts - 
     
 Question: "What is the average slab weight produced in Shift 'A'?"
